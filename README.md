@@ -55,6 +55,7 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 - `/`
 - `/login`
 - `/quizzes`
+- `/quizzes/new`
 - `/rankings`
 - `/api/health`
 - `/api/status`
@@ -83,31 +84,44 @@ flask --app app db upgrade
 ```
 
 ## テスト
+バックエンド:
+
 ```bash
 cd backend && PYTHONPATH=. pytest
 ```
 
+フロントエンド回帰テスト:
+
+```bash
+npm --prefix frontend test
+```
+
 Vercel 設定のみ確認する場合:
+
 ```bash
 cd backend && PYTHONPATH=. pytest tests/test_vercel_deployment.py
 ```
 
 フロントエンドのProduction Build:
+
 ```bash
 npm --prefix frontend install
 npm --prefix frontend run build
 ```
 
-## 一般ユーザー向けフロントエンド（ISSUE-0018）
+## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024）
 既存APIへ接続した一般向けMVP画面を実装しています。
 
 - `/`: ホーム・注目クイズ・ランキングプレビュー
 - `/signup`: メールアドレスとパスワードによる新規登録
 - `/login`: ログイン
 - `/quizzes`: 一覧・キーワード検索・カテゴリ絞り込み・ページング
+- `/quizzes/new`: ログイン済みユーザー向けクイズ作成
 - `/quizzes/{quiz_id}`: 詳細・回答・採点結果
 - `/rankings`: 総合ランキング
 - `/quizzes/{quiz_id}/rankings`: クイズ別ランキング
+
+クイズ作成画面では、タイトル・説明・カテゴリ、1〜50問、各問題2〜6択、正答1件を入力し、JWT付きで `POST /api/quizzes` へ送信します。作成結果は既存API仕様に従って `draft` になり、成功後はクイズ詳細へ遷移します。
 
 MVPの認証情報は次のキーで `localStorage` に保存します。
 
@@ -166,6 +180,8 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
 - Issue: `docs/issues/ISSUE-0016.md`
 - Issue: `docs/issues/ISSUE-0017.md`
 - Issue: `docs/issues/ISSUE-0018.md`
+- Issue: `docs/issues/ISSUE-0020.md`
+- Issue: `docs/issues/ISSUE-0024.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -183,6 +199,7 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
 - Qiita下書き: `docs/qiita/ISSUE-0016_service_status_page_and_ops_visibility.md`
 - Qiita下書き: `docs/qiita/ISSUE-0017_vercel_deployment_foundation.md`
 - Qiita下書き: `docs/qiita/ISSUE-0018_public_quiz_experience_ui.md`
+- Qiita下書き: `docs/qiita/ISSUE-0024_quiz_create_ui.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。

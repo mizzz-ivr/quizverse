@@ -1,3 +1,9 @@
+import {
+  buildAuthPath,
+  consumeAuthReturnPath,
+  rememberAuthReturnPath,
+} from './authNavigation.js'
+
 const TOKEN_KEY = 'quizverse_access_token'
 const USER_KEY = 'quizverse_user'
 
@@ -30,6 +36,14 @@ export function getStoredSession() {
 export function saveSession({ access_token: accessToken, user }) {
   localStorage.setItem(TOKEN_KEY, accessToken)
   localStorage.setItem(USER_KEY, JSON.stringify(user ?? null))
+
+  if (window.location.pathname === '/login' || window.location.pathname === '/signup') {
+    const returnTo = consumeAuthReturnPath()
+    if (returnTo) {
+      queueMicrotask(() => window.location.assign(returnTo))
+    }
+  }
+
   return { accessToken, user: user ?? null }
 }
 
@@ -49,7 +63,10 @@ function handleUnauthorized(accessToken) {
     window.location.reload()
     return
   }
-  window.location.assign('/login')
+
+  const currentPath = `${window.location.pathname}${window.location.search ?? ''}`
+  const returnTo = rememberAuthReturnPath(currentPath)
+  window.location.assign(buildAuthPath('login', returnTo))
 }
 
 function normalizeQuizListPayload(payload) {
@@ -100,6 +117,11 @@ export const publicApi = {
   register: (values) => request('/api/auth/register', { method: 'POST', body: values }),
   login: (values) => request('/api/auth/login', { method: 'POST', body: values }),
   me: (accessToken) => request('/api/auth/me', { accessToken }),
+  createQuiz: (values, accessToken) => request('/api/quizzes', {
+    method: 'POST',
+    body: values,
+    accessToken,
+  }),
   quizzes: async ({ q = '', category = '', page = 1, perPage = 9 } = {}) => {
     const payload = await request('/api/quizzes', {
       query: { q, category, page, per_page: perPage },

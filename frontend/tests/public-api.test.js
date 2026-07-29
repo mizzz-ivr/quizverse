@@ -6,7 +6,7 @@ import { ApiError, publicApi, saveSession } from '../src/public/api.js'
 let assignedPath
 let reloadCount
 
-function createLocalStorage() {
+function createStorage() {
   const values = new Map()
   return {
     getItem: (key) => values.get(key) ?? null,
@@ -27,11 +27,13 @@ function jsonResponse(status, payload) {
 beforeEach(() => {
   assignedPath = null
   reloadCount = 0
-  globalThis.localStorage = createLocalStorage()
+  globalThis.localStorage = createStorage()
+  globalThis.sessionStorage = createStorage()
   globalThis.window = {
     location: {
       origin: 'http://localhost:5173',
       pathname: '/quizzes/1',
+      search: '',
       assign: (path) => {
         assignedPath = path
       },
@@ -45,10 +47,11 @@ beforeEach(() => {
 afterEach(() => {
   delete globalThis.fetch
   delete globalThis.localStorage
+  delete globalThis.sessionStorage
   delete globalThis.window
 })
 
-test('認証付きリクエストが401の場合は保存セッションを破棄してログインへ遷移する', async () => {
+test('認証付きリクエストが401の場合は保存セッションを破棄して復帰先付きログインへ遷移する', async () => {
   saveSession({
     access_token: 'expired-token',
     user: { id: 1, display_name: 'Expired User' },
@@ -64,7 +67,8 @@ test('認証付きリクエストが401の場合は保存セッションを破�
 
   assert.equal(localStorage.getItem('quizverse_access_token'), null)
   assert.equal(localStorage.getItem('quizverse_user'), null)
-  assert.equal(assignedPath, '/login')
+  assert.equal(sessionStorage.getItem('quizverse_auth_return_to'), '/quizzes/1')
+  assert.equal(assignedPath, '/login?next=%2Fquizzes%2F1')
   assert.equal(reloadCount, 0)
 })
 
@@ -121,6 +125,20 @@ test('ログイン失敗の401ではセッション失効リダイレクトを�
 
   assert.equal(assignedPath, null)
   assert.equal(reloadCount, 0)
+})
+
+test('ログイン成功後はnextで指定した安全な画面へ復帰する', async () => {
+  globalThis.window.location.pathname = '/login'
+  globalThis.window.location.search = '?next=%2Fquizzes%2Fnew'
+
+  saveSession({
+    access_token: 'new-token',
+    user: { id: 2, display_name: 'Creator' },
+  })
+  await new Promise((resolve) => queueMicrotask(resolve))
+
+  assert.equal(assignedPath, '/quizzes/new')
+  assert.equal(sessionStorage.getItem('quizverse_auth_return_to'), null)
 })
 
 test('クイズ一覧のdescription_summaryをカード用descriptionへ正規化する', async () => {
