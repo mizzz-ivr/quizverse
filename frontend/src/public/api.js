@@ -100,6 +100,11 @@ export const publicApi = {
   register: (values) => request('/api/auth/register', { method: 'POST', body: values }),
   login: (values) => request('/api/auth/login', { method: 'POST', body: values }),
   me: (accessToken) => request('/api/auth/me', { accessToken }),
+  createQuiz: (values, accessToken) => request('/api/quizzes', {
+    method: 'POST',
+    body: values,
+    accessToken,
+  }),
   quizzes: async ({ q = '', category = '', page = 1, perPage = 9 } = {}) => {
     const payload = await request('/api/quizzes', {
       query: { q, category, page, per_page: perPage },
