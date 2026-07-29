@@ -41,10 +41,15 @@ export function clearSession() {
 function handleUnauthorized(accessToken) {
   if (!accessToken) return
 
+  const storedAccessToken = localStorage.getItem(TOKEN_KEY)
+  if (storedAccessToken !== accessToken) return
+
   clearSession()
-  if (window.location.pathname !== '/login') {
-    window.location.assign('/login')
+  if (window.location.pathname === '/login') {
+    window.location.reload()
+    return
   }
+  window.location.assign('/login')
 }
 
 function normalizeQuizListPayload(payload) {
