@@ -14,6 +14,9 @@ class Config:
     )
     GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
     EMAIL_SETTINGS_ENCRYPTION_KEY = os.getenv("EMAIL_SETTINGS_ENCRYPTION_KEY")
+    QUIZ_PUBLICATION_ENFORCED = (
+        os.getenv("QUIZ_PUBLICATION_ENFORCED", "true").lower() == "true"
+    )
     SERVICE_MAINTENANCE_MODE = os.getenv("SERVICE_MAINTENANCE_MODE", "false").lower() == "true"
     SERVICE_MAINTENANCE_TITLE = os.getenv("SERVICE_MAINTENANCE_TITLE", "メンテナンス情報はありません")
     SERVICE_MAINTENANCE_MESSAGE = os.getenv("SERVICE_MAINTENANCE_MESSAGE", "現在メンテナンス予定はありません。")
