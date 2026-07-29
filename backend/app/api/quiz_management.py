@@ -120,7 +120,6 @@ def _published_quiz_list_response():
         .filter(Quiz.status == QuizStatus.published)
         .group_by(Quiz.id, User.display_name)
     )
-
     total_query = db.session.query(func.count(Quiz.id)).filter(Quiz.status == QuizStatus.published)
 
     if validated["q"]:
@@ -437,6 +436,19 @@ def _validate_publishable(quiz_id: int):
     return True, None
 
 
+def _serialize_status_update(quiz: Quiz, previous_status: QuizStatus):
+    return {
+        "quiz": {
+            "id": str(quiz.id),
+            "title": quiz.title,
+            "previous_status": previous_status.value,
+            "status": quiz.status.value,
+            "published_at": quiz.published_at.isoformat() if quiz.published_at else None,
+            "public_path": f"/quizzes/{quiz.id}" if quiz.status == QuizStatus.published else None,
+        }
+    }
+
+
 @quiz_management_bp.patch("/me/quizzes/<int:quiz_id>/status")
 @jwt_required()
 def update_my_quiz_status(quiz_id: int):
@@ -459,7 +471,10 @@ def update_my_quiz_status(quiz_id: int):
         )
 
     previous_status = quiz.status
-    if target_status != previous_status and target_status not in ALLOWED_TRANSITIONS[previous_status]:
+    if target_status == previous_status:
+        return jsonify(_serialize_status_update(quiz, previous_status))
+
+    if target_status not in ALLOWED_TRANSITIONS[previous_status]:
         return _management_error(
             "quiz/invalid_status_transition",
             f"Cannot change status from {previous_status.value} to {target_status.value}.",
@@ -479,15 +494,4 @@ def update_my_quiz_status(quiz_id: int):
         db.session.rollback()
         return _management_error("quiz/status_update_failed", "Failed to update quiz status.", 500)
 
-    return jsonify(
-        {
-            "quiz": {
-                "id": str(quiz.id),
-                "title": quiz.title,
-                "previous_status": previous_status.value,
-                "status": quiz.status.value,
-                "published_at": quiz.published_at.isoformat() if quiz.published_at else None,
-                "public_path": f"/quizzes/{quiz.id}" if quiz.status == QuizStatus.published else None,
-            }
-        }
-    )
+    return jsonify(_serialize_status_update(quiz, previous_status))
