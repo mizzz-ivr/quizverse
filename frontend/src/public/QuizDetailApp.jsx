@@ -65,7 +65,19 @@ export function QuizDetailApp() {
     let active = true
     setLoading(true)
     setError('')
-    publicApi.quiz(quizId, session?.accessToken)
+
+    const loadQuiz = async () => {
+      try {
+        return await publicApi.quiz(quizId)
+      } catch (requestError) {
+        if (!(requestError instanceof ApiError) || requestError.status !== 404 || !session?.accessToken) {
+          throw requestError
+        }
+        return publicApi.quiz(quizId, session.accessToken)
+      }
+    }
+
+    loadQuiz()
       .then((payload) => {
         if (!active) return
         setQuiz(payload.quiz ?? null)
