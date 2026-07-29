@@ -5,7 +5,8 @@
 - Frontend: React + Tailwind + Vite
 - Backend: Flask + Flask-JWT-Extended + Flask-Migrate + SQLAlchemy
 - DB: PostgreSQL
-- Infra: Docker Compose
+- Local Infra: Docker Compose
+- Deployment: Vercel（Vite Static + Flask Python Function）
 
 ## クイックスタート
 1. `.env.example` をコピーして `.env` を作成
@@ -17,6 +18,52 @@
    - `http://localhost:5000/api/health`
 4. frontend
    - `http://localhost:5173`
+
+## Vercel デプロイ
+QuizVerse は単一の Vercel プロジェクトで frontend と backend を配信します。
+
+- Vite build output: `frontend/dist`
+- Flask Function entrypoint: `api/index.py`
+- `/api/*`: Flask Function へ rewrite
+- その他のパス: SPA の `index.html` へ rewrite
+- DB: 外部 PostgreSQL を `DATABASE_URL` で接続
+
+### Vercel Project Settings
+1. GitHub リポジトリ `mizzz-ivr/quizverse` を Vercel に Import
+2. Root Directory はリポジトリルートのままにする
+3. Framework Preset は `Other` または自動判定を利用
+4. `vercel.json` の install/build/output 設定を利用
+5. Preview / Production の環境変数を登録
+
+### 必須環境変数
+- `DATABASE_URL`
+- `SECRET_KEY`
+- `JWT_SECRET_KEY`
+- `AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false`
+- `OTP_INCLUDE_CODE_IN_RESPONSE=false`
+
+### 機能別環境変数
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `EMAIL_SETTINGS_ENCRYPTION_KEY`
+- `SERVICE_MAINTENANCE_MODE`
+- `SERVICE_MAINTENANCE_TITLE`
+- `SERVICE_MAINTENANCE_MESSAGE`
+- `SERVICE_MAINTENANCE_SCHEDULED_UNTIL`
+- OTP 関連設定（有効期限・再送間隔・試行上限）
+
+### デプロイ後の確認
+- `/api/health`
+- `/api/status`
+- `/status`
+- `/admin`
+
+### DBマイグレーション
+Vercel Function 起動時には自動マイグレーションを実行しません。外部 PostgreSQL のバックアップと対象リビジョンを確認したうえで、明示的に実行してください。
+
+```bash
+cd backend
+DATABASE_URL='<production database url>' flask --app app db upgrade
+```
 
 ## DBマイグレーション
 ```bash
@@ -34,6 +81,11 @@ flask --app app db upgrade
 ## テスト
 ```bash
 cd backend && PYTHONPATH=. pytest
+```
+
+Vercel 設定のみ確認する場合:
+```bash
+cd backend && PYTHONPATH=. pytest tests/test_vercel_deployment.py
 ```
 
 ## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007）
@@ -84,6 +136,7 @@ cd backend && PYTHONPATH=. pytest
 - Issue: `docs/issues/ISSUE-0014.md`
 - Issue: `docs/issues/ISSUE-0015.md`
 - Issue: `docs/issues/ISSUE-0016.md`
+- Issue: `docs/issues/ISSUE-0017.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -99,6 +152,7 @@ cd backend && PYTHONPATH=. pytest
 - Qiita下書き: `docs/qiita/ISSUE-0014_admin_dashboard_foundation.md`
 - Qiita下書き: `docs/qiita/ISSUE-0015_email_settings_ui_and_smtp_api.md`
 - Qiita下書き: `docs/qiita/ISSUE-0016_service_status_page_and_ops_visibility.md`
+- Qiita下書き: `docs/qiita/ISSUE-0017_vercel_deployment_foundation.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。
