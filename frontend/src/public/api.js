@@ -38,6 +38,25 @@ export function clearSession() {
   localStorage.removeItem(USER_KEY)
 }
 
+function handleUnauthorized(accessToken) {
+  if (!accessToken) return
+
+  clearSession()
+  if (window.location.pathname !== '/login') {
+    window.location.assign('/login')
+  }
+}
+
+function normalizeQuizListPayload(payload) {
+  return {
+    ...payload,
+    items: (payload.items ?? []).map((quiz) => ({
+      ...quiz,
+      description: quiz.description ?? quiz.description_summary ?? '',
+    })),
+  }
+}
+
 async function request(path, { method = 'GET', body, accessToken, query } = {}) {
   const url = new URL(path, window.location.origin)
   Object.entries(query ?? {}).forEach(([key, value]) => {
@@ -65,7 +84,7 @@ async function request(path, { method = 'GET', body, accessToken, query } = {}) 
   if (!response.ok) {
     const message = payload?.error?.message ?? 'リクエストの処理に失敗しました。'
     const code = payload?.error?.code ?? ''
-    if (response.status === 401) clearSession()
+    if (response.status === 401) handleUnauthorized(accessToken)
     throw new ApiError(message, response.status, code)
   }
 
@@ -76,10 +95,12 @@ export const publicApi = {
   register: (values) => request('/api/auth/register', { method: 'POST', body: values }),
   login: (values) => request('/api/auth/login', { method: 'POST', body: values }),
   me: (accessToken) => request('/api/auth/me', { accessToken }),
-  quizzes: ({ q = '', category = '', page = 1, perPage = 9 } = {}) =>
-    request('/api/quizzes', {
+  quizzes: async ({ q = '', category = '', page = 1, perPage = 9 } = {}) => {
+    const payload = await request('/api/quizzes', {
       query: { q, category, page, per_page: perPage },
-    }),
+    })
+    return normalizeQuizListPayload(payload)
+  },
   quiz: (quizId) => request(`/api/quizzes/${quizId}`),
   playQuiz: (quizId, answers, accessToken) =>
     request(`/api/quizzes/${quizId}/play`, {
