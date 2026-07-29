@@ -135,6 +135,8 @@ Request:
 - アーカイブから下書きへの復元
 - プレビュー・公開ページ導線
 - ローディング・空状態・エラー・成功通知
+- 状態変更後は1ページ目へ戻し、空になった最終ページへ取り残されないようにする
+- ヘッダー件数は「条件内合計」と「現在ページ内の状態別件数」を明示する
 
 ### `/quizzes/{quiz_id}`
 
@@ -186,21 +188,25 @@ cd backend && PYTHONPATH=. pytest
 - アーカイブ済みクイズを総合ランキングから除外
 - HEADによる非公開クイズ存在確認の防止
 - 採点前の解説非表示・採点後表示
+- 状態変更後の1ページ目への補正
+- ページ内状態件数の集計
 - フロントエンドAPIのJWT・query・PATCH payload
 
 ## 確認結果
 
-- フロントエンドテスト: `25 passed, 0 failed`
-- バックエンドテスト: `60 passed, 1 warning`（6.68秒）
+- フロントエンドテスト: `27 passed, 0 failed`
+- バックエンドテスト: `60 passed, 1 warning`（6.77秒）
 - フロントエンドProduction Build: 成功
-  - JavaScript: 252.56 kB（gzip 71.18 kB）
+  - JavaScript: 252.65 kB（gzip 71.24 kB）
   - CSS: 42.29 kB（gzip 7.20 kB）
-  - build: 1.39秒
+  - build: 1.37秒
 - 既存警告: `User.query.get()` に関するSQLAlchemy 2.x LegacyAPIWarning
-- Codexレビュー3件へ対応
+- Codexレビュー5件へ対応
   - 採点前の解説非表示
   - HEADリクエストへの公開境界
   - 同一公開状態更新の冪等性
+  - 状態変更後のページ番号補正
+  - ページ内件数であることの明示
 - Vercel Preview: Vercelチームに `quizverse` プロジェクトが未作成のため未確認
 
 ## 受け入れ条件
