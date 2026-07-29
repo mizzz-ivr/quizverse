@@ -22,7 +22,7 @@
 | `published` | `archived` |
 | `archived` | `draft`, `published` |
 
-`published` から直接 `draft` へ戻す操作は許可せず、一度 `archived` を経由する。
+`published` から直接 `draft` へ戻す操作は許可せず、一度 `archived` を経由する。同じ状態を再指定した場合は冪等に現在状態を返し、`published_at` を変更しない。
 
 ## 公開境界
 
@@ -30,11 +30,13 @@
 
 対象:
 
-- `GET /api/quizzes`
-- `GET /api/quizzes/{quiz_id}`
+- `GET / HEAD /api/quizzes`
+- `GET / HEAD /api/quizzes/{quiz_id}`
 - `POST /api/quizzes/{quiz_id}/play`
-- `GET /api/quizzes/{quiz_id}/rankings`
-- `GET /api/rankings`
+- `GET / HEAD /api/quizzes/{quiz_id}/rankings`
+- `GET / HEAD /api/rankings`
+
+FlaskはGETルートへHEADを自動提供するため、GET相当の公開境界はHEADにも同じ判定を適用する。
 
 ### 公開一覧
 
@@ -45,7 +47,7 @@
 - 未認証または非作成者: 404
 - 作成者本人: JWT付きリクエストに限りプレビューを返す
 
-存在確認による情報漏えいを避けるため、非作成者には403ではなく404を返す。
+存在確認による情報漏えいを避けるため、非作成者には403ではなく404を返す。HEADでも同じ404を返し、レスポンス本文の有無による回避を許さない。
 
 作成者プレビューには以下を追加する。
 
@@ -116,7 +118,7 @@ Request:
 - 各問題に2〜6件の選択肢が存在する
 - 各問題の正答が1件である
 
-公開成功時は `published_at` を現在時刻で更新する。
+実際に `published` へ遷移した場合だけ `published_at` を現在時刻で更新する。同じ `published` を再送した場合は公開日時を維持する。
 
 本人以外の操作は404とする。
 
@@ -141,6 +143,10 @@ Request:
 - `published`: 回答可能
 - 作成者の `draft / archived`: プレビュー表示、回答不可、管理画面導線を表示
 - 非作成者の非公開クイズ: 404表示
+- 一般プレイヤーには採点完了まで問題解説を表示しない
+- 作成者プレビューでは公開前確認のため解説を表示する
+
+公開済みクイズはまず匿名で取得し、404かつ保存済みJWTがある場合だけ作成者プレビューを再試行する。古いJWTが保存されていても、公開済みクイズの閲覧を妨げない。
 
 ## 設定
 
@@ -153,10 +159,11 @@ QUIZ_PUBLICATION_ENFORCED=true
 ## セキュリティ
 
 - 作成者判定はJWT identityと `author_user_id` で行う
-- 非公開クイズは第三者へ404
+- 非公開クイズは第三者へGET・HEADとも404
 - 作成者プレビューでも正答フラグを返さない
 - 公開状態更新は本人所有クイズだけに限定
 - 公開ランキングは現在公開中のクイズだけを集計
+- 一般プレイヤーには採点前の解説を表示しない
 
 ## テスト
 
@@ -174,9 +181,40 @@ cd backend && PYTHONPATH=. pytest
 - 下書きへ回答送信できない
 - 公開・アーカイブ・復元
 - 不正な状態遷移
+- 同一状態更新の冪等性
 - 他ユーザーによる状態変更拒否
 - アーカイブ済みクイズを総合ランキングから除外
+- HEADによる非公開クイズ存在確認の防止
+- 採点前の解説非表示・採点後表示
 - フロントエンドAPIのJWT・query・PATCH payload
+
+## 確認結果
+
+- フロントエンドテスト: `25 passed, 0 failed`
+- バックエンドテスト: `60 passed, 1 warning`（6.68秒）
+- フロントエンドProduction Build: 成功
+  - JavaScript: 252.56 kB（gzip 71.18 kB）
+  - CSS: 42.29 kB（gzip 7.20 kB）
+  - build: 1.39秒
+- 既存警告: `User.query.get()` に関するSQLAlchemy 2.x LegacyAPIWarning
+- Codexレビュー3件へ対応
+  - 採点前の解説非表示
+  - HEADリクエストへの公開境界
+  - 同一公開状態更新の冪等性
+- Vercel Preview: Vercelチームに `quizverse` プロジェクトが未作成のため未確認
+
+## 受け入れ条件
+
+- [x] 公開一覧にdraft / archivedが含まれない
+- [x] 非作成者はdraft / archivedの詳細・回答・ランキングへアクセスできない
+- [x] 作成者は自分のクイズ一覧を取得できる
+- [x] 他ユーザーのクイズ状態を変更できない
+- [x] 作成者がdraftをpublishedへ変更できる
+- [x] 作成者がpublishedをarchivedへ変更できる
+- [x] `/my/quizzes` から状態変更できる
+- [x] 作成直後の下書きを作成者が確認できる
+- [x] frontend test / production build / backend testが成功する
+- [ ] Vercel Previewで実ブラウザ確認する
 
 ## 対象外
 
@@ -190,6 +228,7 @@ cd backend && PYTHONPATH=. pytest
 ## 関連
 
 - GitHub Issue #26
+- GitHub PR #27
 - `backend/app/api/quiz_management.py`
 - `frontend/src/public/MyQuizzesApp.jsx`
 - `frontend/src/public/QuizDetailApp.jsx`
