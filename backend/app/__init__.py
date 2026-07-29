@@ -3,6 +3,7 @@ from flask import Flask
 from .api.admin import admin_bp
 from .api.auth import auth_bp
 from .api.health import health_bp
+from .api.quiz_management import quiz_management_bp
 from .api.quizzes import quizzes_bp
 from .api.rankings import rankings_bp
 from .api.status import status_bp
@@ -22,6 +23,7 @@ def create_app(config_class=Config):
     app.register_blueprint(health_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(quiz_management_bp)
     app.register_blueprint(quizzes_bp)
     app.register_blueprint(rankings_bp)
     app.register_blueprint(status_bp)
