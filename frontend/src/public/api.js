@@ -128,8 +128,7 @@ export const publicApi = {
     })
     return normalizeQuizListPayload(payload)
   },
-  quiz: (quizId, accessToken = getStoredSession()?.accessToken) =>
-    request(`/api/quizzes/${quizId}`, { accessToken }),
+  quiz: (quizId, accessToken) => request(`/api/quizzes/${quizId}`, { accessToken }),
   playQuiz: (quizId, answers, accessToken) =>
     request(`/api/quizzes/${quizId}/play`, {
       method: 'POST',
