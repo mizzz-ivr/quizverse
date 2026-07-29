@@ -109,6 +109,29 @@ cd backend && PYTHONPATH=. pytest
 - 既存フロントエンド回帰
 - バックエンド回帰
 
+## 確認結果
+- フロントエンドテスト: `11 passed, 0 failed`
+- フロントエンドProduction Build: 成功
+  - JavaScript: 220.13 kB（gzip 64.89 kB）
+  - CSS: 40.00 kB（gzip 6.99 kB）
+  - build: 1.29秒
+- バックエンドテスト: `52 passed, 1 warning`（5.16秒）
+- 既存警告: `User.query.get()` に関するSQLAlchemy 2.x LegacyAPIWarning
+- Vercel Preview: Vercelチームに `quizverse` プロジェクトが未作成のため未確認
+
+## 受け入れ条件
+- [x] `/quizzes/new` を直接開ける
+- [x] 未ログイン時はログイン・新規登録を案内する
+- [x] タイトル、説明、カテゴリを入力できる
+- [x] 1〜50問を追加・削除できる
+- [x] 各問題に2〜6択を設定できる
+- [x] 各問題で正答を1つ指定できる
+- [x] 不正な入力を送信前に表示できる
+- [x] JWT付きで `POST /api/quizzes` を送信できる
+- [x] 作成成功後に詳細画面へ遷移する
+- [x] frontend test / production build / backend testが成功する
+- [ ] Vercel Previewで実ブラウザ確認する
+
 ## 対象外
 - 画像・動画
 - 下書き一覧・編集
@@ -120,6 +143,7 @@ cd backend && PYTHONPATH=. pytest
 
 ## 関連
 - GitHub Issue #24
+- GitHub PR #25
 - `frontend/src/public/CreateQuizApp.jsx`
 - `frontend/src/public/createQuizModel.js`
 - `frontend/src/public/api.js`
