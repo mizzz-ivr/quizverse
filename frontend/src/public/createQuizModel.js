@@ -10,6 +10,8 @@ export const QUIZ_LIMITS = {
   maxChoices: 6,
 }
 
+export const QUIZ_DRAFT_KEY = 'quizverse_quiz_create_draft'
+
 let fallbackSequence = 0
 
 export function createClientId(prefix = 'item') {
@@ -18,25 +20,29 @@ export function createClientId(prefix = 'item') {
   return `${prefix}-${Date.now()}-${fallbackSequence}`
 }
 
-export function createChoice({ body = '', isCorrect = false } = {}) {
+export function createChoice({ body = '', isCorrect = false, clientId } = {}) {
   return {
-    clientId: createClientId('choice'),
-    body,
-    isCorrect,
+    clientId: clientId || createClientId('choice'),
+    body: typeof body === 'string' ? body : '',
+    isCorrect: isCorrect === true,
   }
 }
 
-export function createQuestion() {
+export function createQuestion({ body = '', explanation = '', choices, clientId } = {}) {
+  const initialChoices = Array.isArray(choices) && choices.length > 0
+    ? choices.map((choice) => createChoice(choice))
+    : [
+        createChoice({ isCorrect: true }),
+        createChoice(),
+        createChoice(),
+        createChoice(),
+      ]
+
   return {
-    clientId: createClientId('question'),
-    body: '',
-    explanation: '',
-    choices: [
-      createChoice({ isCorrect: true }),
-      createChoice(),
-      createChoice(),
-      createChoice(),
-    ],
+    clientId: clientId || createClientId('question'),
+    body: typeof body === 'string' ? body : '',
+    explanation: typeof explanation === 'string' ? explanation : '',
+    choices: initialChoices,
   }
 }
 
@@ -46,6 +52,49 @@ export function createInitialQuizDraft() {
     description: '',
     category: '',
     questions: [createQuestion()],
+  }
+}
+
+export function saveQuizDraft(draft, storage = globalThis.sessionStorage) {
+  try {
+    storage?.setItem?.(QUIZ_DRAFT_KEY, JSON.stringify(draft))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function loadQuizDraft(storage = globalThis.sessionStorage) {
+  try {
+    const rawDraft = storage?.getItem?.(QUIZ_DRAFT_KEY)
+    if (!rawDraft) return createInitialQuizDraft()
+
+    const parsed = JSON.parse(rawDraft)
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      return createInitialQuizDraft()
+    }
+
+    return {
+      title: typeof parsed.title === 'string' ? parsed.title : '',
+      description: typeof parsed.description === 'string' ? parsed.description : '',
+      category: typeof parsed.category === 'string' ? parsed.category : '',
+      questions: parsed.questions.slice(0, QUIZ_LIMITS.questions).map((question) => createQuestion({
+        ...question,
+        choices: Array.isArray(question?.choices)
+          ? question.choices.slice(0, QUIZ_LIMITS.maxChoices)
+          : undefined,
+      })),
+    }
+  } catch {
+    return createInitialQuizDraft()
+  }
+}
+
+export function clearQuizDraft(storage = globalThis.sessionStorage) {
+  try {
+    storage?.removeItem?.(QUIZ_DRAFT_KEY)
+  } catch {
+    // Storage can be unavailable in privacy-restricted environments.
   }
 }
 
