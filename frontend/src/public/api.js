@@ -128,7 +128,8 @@ export const publicApi = {
     })
     return normalizeQuizListPayload(payload)
   },
-  quiz: (quizId) => request(`/api/quizzes/${quizId}`),
+  quiz: (quizId, accessToken = getStoredSession()?.accessToken) =>
+    request(`/api/quizzes/${quizId}`, { accessToken }),
   playQuiz: (quizId, answers, accessToken) =>
     request(`/api/quizzes/${quizId}/play`, {
       method: 'POST',
@@ -139,4 +140,15 @@ export const publicApi = {
     request('/api/rankings', { query: { page, per_page: perPage } }),
   quizRankings: (quizId, { page = 1, perPage = 20 } = {}) =>
     request(`/api/quizzes/${quizId}/rankings`, { query: { page, per_page: perPage } }),
+  myQuizzes: ({ status = 'all', page = 1, perPage = 20 } = {}, accessToken) =>
+    request('/api/me/quizzes', {
+      accessToken,
+      query: { status, page, per_page: perPage },
+    }),
+  updateQuizStatus: (quizId, status, accessToken) =>
+    request(`/api/me/quizzes/${quizId}/status`, {
+      method: 'PATCH',
+      accessToken,
+      body: { status },
+    }),
 }
