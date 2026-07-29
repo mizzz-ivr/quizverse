@@ -57,6 +57,12 @@ MVPでは以下を `localStorage` に保存する。
 - 未回答はバックエンド仕様に従い `skipped` として採点する。
 - 正答判定はサーバー側で行い、プレイ前のレスポンスから正答を推測しない。
 
+## 確認結果
+- GitHub Actions バックエンドテスト: `52 passed, 1 warning`
+- GitHub Actions フロントエンドビルド: 成功
+- Vite出力: JavaScript 198.96 kB（gzip 60.12 kB）、CSS 35.68 kB（gzip 6.44 kB）
+- Vercel Preview: Vercel側にQuizVerseプロジェクトが未作成のため未実施
+
 ## 受け入れ条件
 - [x] 一般向けホームを表示できる
 - [x] 新規登録とログインを実行できる
@@ -67,7 +73,7 @@ MVPでは以下を `localStorage` に保存する。
 - [x] 総合・クイズ別ランキングを表示できる
 - [x] ローディング・空状態・エラー状態を表示できる
 - [x] 既存の管理画面とサービス状況ページを維持する
-- [ ] GitHub Actionsでfrontend production buildが成功する
+- [x] GitHub Actionsでfrontend production buildが成功する
 
 ## 対象外・次回以降
 - クイズ作成UI
