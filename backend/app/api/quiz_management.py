@@ -25,6 +25,7 @@ quiz_management_bp = Blueprint("quiz_management", __name__, url_prefix="/api")
 QUIZ_DETAIL_PATTERN = re.compile(r"^/api/quizzes/(?P<quiz_id>\d+)$")
 QUIZ_PLAY_PATTERN = re.compile(r"^/api/quizzes/(?P<quiz_id>\d+)/play$")
 QUIZ_RANKING_PATTERN = re.compile(r"^/api/quizzes/(?P<quiz_id>\d+)/rankings$")
+GET_LIKE_METHODS = {"GET", "HEAD"}
 ALLOWED_STATUS_FILTERS = {"all", *(status.value for status in QuizStatus)}
 ALLOWED_TRANSITIONS = {
     QuizStatus.draft: {QuizStatus.published, QuizStatus.archived},
@@ -290,14 +291,14 @@ def enforce_quiz_publication_visibility():
     if not _publication_enforced():
         return None
 
-    if request.method == "GET" and request.path == "/api/quizzes":
+    if request.method in GET_LIKE_METHODS and request.path == "/api/quizzes":
         return _published_quiz_list_response()
 
-    if request.method == "GET" and request.path == "/api/rankings":
+    if request.method in GET_LIKE_METHODS and request.path == "/api/rankings":
         return _published_overall_rankings_response()
 
     detail_match = QUIZ_DETAIL_PATTERN.match(request.path)
-    if request.method == "GET" and detail_match:
+    if request.method in GET_LIKE_METHODS and detail_match:
         quiz_id = int(detail_match.group("quiz_id"))
         quiz = Quiz.query.filter_by(id=quiz_id).first()
         if not quiz:
@@ -316,7 +317,7 @@ def enforce_quiz_publication_visibility():
             return quiz_error_response("quiz/not_found", "Quiz not found.", 404)
 
     ranking_match = QUIZ_RANKING_PATTERN.match(request.path)
-    if request.method == "GET" and ranking_match:
+    if request.method in GET_LIKE_METHODS and ranking_match:
         quiz_id = int(ranking_match.group("quiz_id"))
         quiz = Quiz.query.filter_by(id=quiz_id, status=QuizStatus.published).first()
         if not quiz:
