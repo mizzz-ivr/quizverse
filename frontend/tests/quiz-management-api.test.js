@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test, { afterEach, beforeEach } from 'node:test'
 
-import { publicApi, saveSession } from '../src/public/api.js'
+import { publicApi } from '../src/public/api.js'
 
 let requests
 
@@ -73,11 +73,16 @@ test('クイズ状態更新APIへPATCHで状態を送信する', async () => {
   assert.deepEqual(JSON.parse(requests[0].options.body), { status: 'published' })
 })
 
-test('クイズ詳細取得では保存済みJWTを作成者プレビュー用に自動送信する', async () => {
-  saveSession({ access_token: 'stored-token', user: { id: '1', display_name: 'Owner' } })
-
+test('公開クイズ詳細はJWTなしで取得する', async () => {
   await publicApi.quiz('7')
 
   assert.equal(requests[0].path, '/api/quizzes/7')
-  assert.equal(requests[0].options.headers.Authorization, 'Bearer stored-token')
+  assert.equal(requests[0].options.headers.Authorization, undefined)
+})
+
+test('作成者プレビューでは明示したJWTを送信する', async () => {
+  await publicApi.quiz('7', 'owner-token')
+
+  assert.equal(requests[0].path, '/api/quizzes/7')
+  assert.equal(requests[0].options.headers.Authorization, 'Bearer owner-token')
 })
