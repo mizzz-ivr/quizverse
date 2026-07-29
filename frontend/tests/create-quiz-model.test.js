@@ -3,9 +3,21 @@ import test from 'node:test'
 
 import {
   buildCreateQuizPayload,
+  clearQuizDraft,
   createInitialQuizDraft,
+  loadQuizDraft,
+  saveQuizDraft,
   validateQuizDraft,
 } from '../src/public/createQuizModel.js'
+
+function createStorage() {
+  const values = new Map()
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key),
+  }
+}
 
 test('初期状態は1問4択で正答が1つ設定される', () => {
   const draft = createInitialQuizDraft()
@@ -87,4 +99,35 @@ test('任意項目が空の場合はnullへ正規化する', () => {
   assert.equal(payload.description, null)
   assert.equal(payload.category, null)
   assert.equal(payload.questions[0].explanation, null)
+})
+
+test('入力途中の下書きを保存して復元できる', () => {
+  const storage = createStorage()
+  const draft = createInitialQuizDraft()
+  draft.title = '復元するクイズ'
+  draft.questions[0].body = '復元する問題文'
+  draft.questions[0].choices[0].body = '正解'
+
+  assert.equal(saveQuizDraft(draft, storage), true)
+
+  const restored = loadQuizDraft(storage)
+  assert.equal(restored.title, '復元するクイズ')
+  assert.equal(restored.questions[0].body, '復元する問題文')
+  assert.equal(restored.questions[0].choices[0].body, '正解')
+  assert.ok(restored.questions[0].clientId)
+  assert.ok(restored.questions[0].choices[0].clientId)
+})
+
+test('下書きを削除すると初期状態へ戻る', () => {
+  const storage = createStorage()
+  const draft = createInitialQuizDraft()
+  draft.title = '削除対象'
+  saveQuizDraft(draft, storage)
+
+  clearQuizDraft(storage)
+  const restored = loadQuizDraft(storage)
+
+  assert.equal(restored.title, '')
+  assert.equal(restored.questions.length, 1)
+  assert.equal(restored.questions[0].choices.length, 4)
 })
