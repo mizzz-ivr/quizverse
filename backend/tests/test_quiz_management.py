@@ -165,6 +165,23 @@ def test_owner_can_list_publish_archive_and_restore_quizzes():
     assert draft_response.get_json()["quiz"]["status"] == "draft"
 
 
+def test_repeating_same_status_is_idempotent():
+    _app, client = _create_client()
+    owner_token = _register(client, "idempotent@example.com", "Idempotent")
+    quiz_id = _create_quiz(client, owner_token)
+
+    first = _change_status(client, owner_token, quiz_id, "published")
+    assert first.status_code == 200
+    first_published_at = first.get_json()["quiz"]["published_at"]
+
+    second = _change_status(client, owner_token, quiz_id, "published")
+    assert second.status_code == 200
+    repeated = second.get_json()["quiz"]
+    assert repeated["previous_status"] == "published"
+    assert repeated["status"] == "published"
+    assert repeated["published_at"] == first_published_at
+
+
 def test_non_owner_cannot_change_quiz_status():
     _app, client = _create_client()
     owner_token = _register(client, "owner2@example.com", "Owner2")
