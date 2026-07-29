@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { buildAuthPath, rememberAuthReturnPath } from './authNavigation.js'
 import { ApiError, getStoredSession, publicApi } from './api.js'
+import { shouldShowQuestionExplanation } from './quizDetailVisibility.js'
 
 function Icon({ name, className = 'h-5 w-5' }) {
   const common = { className, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'aria-hidden': true }
@@ -89,6 +90,10 @@ export function QuizDetailApp() {
 
   const playEnabled = quiz?.play_enabled !== false && quiz?.status === 'published'
   const answeredCount = Object.keys(answers).length
+  const showExplanations = shouldShowQuestionExplanation({
+    viewerIsAuthor: quiz?.viewer_is_author,
+    hasResult: Boolean(result),
+  })
 
   const submit = async () => {
     if (!session?.accessToken) {
@@ -131,7 +136,7 @@ export function QuizDetailApp() {
 
         <ResultPanel result={result} />
 
-        <div className="space-y-5">{(quiz.questions ?? []).map((question, questionIndex) => <section key={question.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-7"><div className="flex items-start gap-4"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-slate-950 font-semibold text-white dark:bg-white dark:text-slate-950">{questionIndex + 1}</span><div className="min-w-0 flex-1"><h2 className="text-lg font-semibold leading-7">{question.body}</h2>{(quiz.viewer_is_author || result) && question.explanation ? <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600 dark:bg-slate-950 dark:text-slate-300"><span className="font-medium">解説: </span>{question.explanation}</p> : null}</div></div><div className="mt-5 grid gap-3 sm:grid-cols-2">{question.choices.map((choice, choiceIndex) => { const selected = answers[question.id] === choice.id; return <button key={choice.id} type="button" disabled={!playEnabled || Boolean(result)} onClick={() => setAnswers((current) => ({ ...current, [question.id]: choice.id }))} className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition disabled:cursor-not-allowed ${selected ? 'border-cyan-400 bg-cyan-50 ring-4 ring-cyan-500/10 dark:border-cyan-500 dark:bg-cyan-500/10' : 'border-slate-200 bg-slate-50 hover:border-cyan-300 hover:bg-cyan-50/50 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-cyan-500/50'} ${!playEnabled ? 'opacity-70' : ''}`}><span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-sm font-semibold ${selected ? 'bg-cyan-600 text-white' : 'bg-white text-slate-500 shadow-sm dark:bg-slate-900'}`}>{selected ? <Icon name="check" className="h-4 w-4" /> : String.fromCharCode(65 + choiceIndex)}</span><span>{choice.body}</span></button> })}</div></section>)}</div>
+        <div className="space-y-5">{(quiz.questions ?? []).map((question, questionIndex) => <section key={question.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-7"><div className="flex items-start gap-4"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-slate-950 font-semibold text-white dark:bg-white dark:text-slate-950">{questionIndex + 1}</span><div className="min-w-0 flex-1"><h2 className="text-lg font-semibold leading-7">{question.body}</h2>{showExplanations && question.explanation ? <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600 dark:bg-slate-950 dark:text-slate-300"><span className="font-medium">解説: </span>{question.explanation}</p> : null}</div></div><div className="mt-5 grid gap-3 sm:grid-cols-2">{question.choices.map((choice, choiceIndex) => { const selected = answers[question.id] === choice.id; return <button key={choice.id} type="button" disabled={!playEnabled || Boolean(result)} onClick={() => setAnswers((current) => ({ ...current, [question.id]: choice.id }))} className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition disabled:cursor-not-allowed ${selected ? 'border-cyan-400 bg-cyan-50 ring-4 ring-cyan-500/10 dark:border-cyan-500 dark:bg-cyan-500/10' : 'border-slate-200 bg-slate-50 hover:border-cyan-300 hover:bg-cyan-50/50 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-cyan-500/50'} ${!playEnabled ? 'opacity-70' : ''}`}><span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-sm font-semibold ${selected ? 'bg-cyan-600 text-white' : 'bg-white text-slate-500 shadow-sm dark:bg-slate-900'}`}>{selected ? <Icon name="check" className="h-4 w-4" /> : String.fromCharCode(65 + choiceIndex)}</span><span>{choice.body}</span></button> })}</div></section>)}</div>
 
         {playEnabled ? <section className="sticky bottom-4 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-2xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><p className="font-medium">{answeredCount} / {quiz.questions?.length ?? 0}問 回答済み</p><p className="mt-1 text-xs text-slate-500">未回答の問題はスキップとして採点されます。</p></div><button type="button" disabled={submitting || Boolean(result)} onClick={submit} className="rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-6 py-3 font-semibold text-white shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-indigo-400 disabled:cursor-not-allowed disabled:opacity-50">{submitting ? '採点中...' : result ? '回答済み' : session?.accessToken ? '回答を送信' : 'ログインして回答'}</button></div></section> : null}
       </main>
