@@ -49,17 +49,28 @@ npm --prefix frontend run build
 cd backend && PYTHONPATH=. pytest
 ```
 
+## 確認結果
+- フロントエンド回帰テスト: `3 passed, 0 failed`
+- フロントエンドProduction Build: 成功
+  - JavaScript: 199.21 kB（gzip 60.21 kB）
+  - CSS: 35.68 kB（gzip 6.44 kB）
+  - build: 1.46秒
+- バックエンドテスト: `52 passed, 1 warning`（5.09秒）
+- 警告: `User.query.get()` に関するSQLAlchemy 2.x LegacyAPIWarning
+- Vercel Preview: Vercelチームに`quizverse`プロジェクトが未作成のため未確認
+
 ## 受け入れ条件
 - [x] 401後に期限切れセッションを保持しない実装になっている
 - [x] ログイン失敗とセッション失効を区別している
 - [x] クイズ一覧の説明文を正しく表示できるデータ構造へ正規化している
 - [x] フロントエンド回帰テストを追加している
 - [x] GitHub Actionsでフロントエンドテストを実行する
-- [ ] GitHub Actionsの全ジョブが成功する
+- [x] GitHub Actionsの全ジョブが成功する
 - [ ] Vercel環境で認証失効とクイズ一覧表示を確認する
 
 ## 関連
 - GitHub Issue #20
 - GitHub PR #19
+- GitHub PR #23
 - `frontend/src/public/api.js`
 - `frontend/tests/public-api.test.js`
