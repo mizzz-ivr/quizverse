@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { buildAuthPath, rememberAuthReturnPath } from './authNavigation.js'
 import { ApiError, getStoredSession, publicApi } from './api.js'
+import { countPageQuizStatuses, pageAfterQuizStatusChange } from './myQuizzesModel.js'
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'すべて' },
@@ -154,10 +155,7 @@ export function MyQuizzesApp() {
     return () => { active = false }
   }, [sessionStatus, session?.accessToken, status, page, refreshVersion])
 
-  const counts = useMemo(() => payload.items.reduce((result, quiz) => {
-    result[quiz.status] = (result[quiz.status] ?? 0) + 1
-    return result
-  }, {}), [payload.items])
+  const counts = useMemo(() => countPageQuizStatuses(payload.items), [payload.items])
 
   const changeStatus = async (quiz, nextStatus) => {
     setPending(quiz.id)
@@ -167,6 +165,7 @@ export function MyQuizzesApp() {
       const response = await publicApi.updateQuizStatus(quiz.id, nextStatus, session.accessToken)
       const label = STATUS_META[response.quiz.status]?.label ?? response.quiz.status
       setNotice(`「${quiz.title}」を${label}に変更しました。`)
+      setPage(pageAfterQuizStatusChange())
       setRefreshVersion((current) => current + 1)
     } catch (requestError) {
       setError(friendlyError(requestError))
@@ -190,7 +189,7 @@ export function MyQuizzesApp() {
       <main className="relative z-10 mx-auto max-w-7xl px-4 py-8 md:px-6 md:py-12">
         <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-indigo-950 to-cyan-950 p-6 text-white shadow-2xl shadow-indigo-950/20 md:p-9">
           <p className="text-sm font-semibold tracking-[0.18em] text-cyan-300">QUIZ WORKSPACE</p>
-          <div className="mt-3 flex flex-col justify-between gap-6 lg:flex-row lg:items-end"><div><h1 className="text-3xl font-semibold tracking-[-0.03em] md:text-5xl">作ったクイズを、<br />公開まで育てる。</h1><p className="mt-5 max-w-2xl leading-7 text-slate-300">下書きの確認、公開、公開終了、再公開をここから管理できます。</p></div><div className="grid grid-cols-3 gap-3 text-center text-sm"><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">表示中</p><p className="mt-1 text-2xl font-semibold">{payload.pagination?.total ?? 0}</p></div><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">公開中</p><p className="mt-1 text-2xl font-semibold">{counts.published ?? 0}</p></div><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">下書き</p><p className="mt-1 text-2xl font-semibold">{counts.draft ?? 0}</p></div></div></div>
+          <div className="mt-3 flex flex-col justify-between gap-6 lg:flex-row lg:items-end"><div><h1 className="text-3xl font-semibold tracking-[-0.03em] md:text-5xl">作ったクイズを、<br />公開まで育てる。</h1><p className="mt-5 max-w-2xl leading-7 text-slate-300">下書きの確認、公開、公開終了、再公開をここから管理できます。</p></div><div className="grid grid-cols-3 gap-3 text-center text-sm"><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">条件内合計</p><p className="mt-1 text-2xl font-semibold">{payload.pagination?.total ?? 0}</p></div><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">ページ内 公開中</p><p className="mt-1 text-2xl font-semibold">{counts.published ?? 0}</p></div><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">ページ内 下書き</p><p className="mt-1 text-2xl font-semibold">{counts.draft ?? 0}</p></div></div></div>
         </section>
 
         <section className="mt-8 flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:flex-row md:items-center md:justify-between">
