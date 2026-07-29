@@ -31,7 +31,7 @@ jobs:
         run: pytest
 
   frontend-build:
-    name: フロントエンドビルド
+    name: フロントエンドテスト・ビルド
     runs-on: ubuntu-latest
     steps:
       - name: リポジトリをチェックアウト
@@ -46,6 +46,9 @@ jobs:
 
       - name: frontend依存関係をインストール
         run: npm --prefix frontend install
+
+      - name: frontendテストを実行
+        run: npm --prefix frontend test
 
       - name: frontendをビルド
         run: npm --prefix frontend run build
