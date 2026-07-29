@@ -52,6 +52,10 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 - OTP 関連設定（有効期限・再送間隔・試行上限）
 
 ### デプロイ後の確認
+- `/`
+- `/login`
+- `/quizzes`
+- `/rankings`
 - `/api/health`
 - `/api/status`
 - `/status`
@@ -87,6 +91,30 @@ Vercel 設定のみ確認する場合:
 ```bash
 cd backend && PYTHONPATH=. pytest tests/test_vercel_deployment.py
 ```
+
+フロントエンドのProduction Build:
+```bash
+npm --prefix frontend install
+npm --prefix frontend run build
+```
+
+## 一般ユーザー向けフロントエンド（ISSUE-0018）
+既存APIへ接続した一般向けMVP画面を実装しています。
+
+- `/`: ホーム・注目クイズ・ランキングプレビュー
+- `/signup`: メールアドレスとパスワードによる新規登録
+- `/login`: ログイン
+- `/quizzes`: 一覧・キーワード検索・カテゴリ絞り込み・ページング
+- `/quizzes/{quiz_id}`: 詳細・回答・採点結果
+- `/rankings`: 総合ランキング
+- `/quizzes/{quiz_id}/rankings`: クイズ別ランキング
+
+MVPの認証情報は次のキーで `localStorage` に保存します。
+
+- `quizverse_access_token`
+- `quizverse_user`
+
+起動時に `GET /api/auth/me` でトークンを確認し、401応答時は保存済み認証情報を削除します。HttpOnly Cookie / refresh tokenへの移行は今後の課題です。
 
 ## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007）
 - JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `AUTH_ENABLE_DEV_TOKEN_ENDPOINT`）。
@@ -137,6 +165,7 @@ cd backend && PYTHONPATH=. pytest tests/test_vercel_deployment.py
 - Issue: `docs/issues/ISSUE-0015.md`
 - Issue: `docs/issues/ISSUE-0016.md`
 - Issue: `docs/issues/ISSUE-0017.md`
+- Issue: `docs/issues/ISSUE-0018.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -153,6 +182,7 @@ cd backend && PYTHONPATH=. pytest tests/test_vercel_deployment.py
 - Qiita下書き: `docs/qiita/ISSUE-0015_email_settings_ui_and_smtp_api.md`
 - Qiita下書き: `docs/qiita/ISSUE-0016_service_status_page_and_ops_visibility.md`
 - Qiita下書き: `docs/qiita/ISSUE-0017_vercel_deployment_foundation.md`
+- Qiita下書き: `docs/qiita/ISSUE-0018_public_quiz_experience_ui.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。
