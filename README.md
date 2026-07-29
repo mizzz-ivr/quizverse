@@ -41,6 +41,7 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 - `JWT_SECRET_KEY`
 - `AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false`
 - `OTP_INCLUDE_CODE_IN_RESPONSE=false`
+- `QUIZ_PUBLICATION_ENFORCED=true`
 
 ### 機能別環境変数
 - `GOOGLE_OAUTH_CLIENT_ID`
@@ -56,6 +57,7 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 - `/login`
 - `/quizzes`
 - `/quizzes/new`
+- `/my/quizzes`
 - `/rankings`
 - `/api/health`
 - `/api/status`
@@ -109,19 +111,28 @@ npm --prefix frontend install
 npm --prefix frontend run build
 ```
 
-## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024）
+## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024, ISSUE-0026）
 既存APIへ接続した一般向けMVP画面を実装しています。
 
 - `/`: ホーム・注目クイズ・ランキングプレビュー
 - `/signup`: メールアドレスとパスワードによる新規登録
 - `/login`: ログイン
-- `/quizzes`: 一覧・キーワード検索・カテゴリ絞り込み・ページング
+- `/quizzes`: 公開中クイズの一覧・キーワード検索・カテゴリ絞り込み・ページング
 - `/quizzes/new`: ログイン済みユーザー向けクイズ作成
-- `/quizzes/{quiz_id}`: 詳細・回答・採点結果
-- `/rankings`: 総合ランキング
-- `/quizzes/{quiz_id}/rankings`: クイズ別ランキング
+- `/my/quizzes`: 自分の下書き・公開中・アーカイブ済みクイズ管理
+- `/quizzes/{quiz_id}`: 公開クイズの詳細・回答・採点結果、または作成者向け非公開プレビュー
+- `/rankings`: 現在公開中クイズを対象とした総合ランキング
+- `/quizzes/{quiz_id}/rankings`: 公開中クイズのクイズ別ランキング
 
-クイズ作成画面では、タイトル・説明・カテゴリ、1〜50問、各問題2〜6択、正答1件を入力し、JWT付きで `POST /api/quizzes` へ送信します。作成結果は既存API仕様に従って `draft` になり、成功後はクイズ詳細へ遷移します。
+クイズ作成画面では、タイトル・説明・カテゴリ、1〜50問、各問題2〜6択、正答1件を入力し、JWT付きで `POST /api/quizzes` へ送信します。作成結果は `draft` となり、作成者は詳細画面でプレビューした後、マイクイズ画面から公開できます。
+
+### クイズ公開ライフサイクル
+
+- `draft`: 作成者だけがプレビュー可能。一般一覧・回答・ランキング対象外
+- `published`: 一般一覧・詳細・回答・ランキング対象
+- `archived`: 公開終了。作成者だけがプレビュー・再公開可能
+
+非公開クイズへ非作成者がアクセスした場合は、存在を推測させないため404を返します。公開状態の境界は `QUIZ_PUBLICATION_ENFORCED=true` で有効化し、本番では必ず `true` を設定してください。
 
 MVPの認証情報は次のキーで `localStorage` に保存します。
 
@@ -136,12 +147,14 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
 - Google OAuth ログインを利用する場合は `GOOGLE_OAUTH_CLIENT_ID` を設定してください。
 - メール設定暗号化キーは `EMAIL_SETTINGS_ENCRYPTION_KEY` で指定できます。未指定時は `SECRET_KEY` から導出した鍵を仮利用します。
 - 本実装済みエンドポイント
-  - `POST /api/quizzes`: JWT必須。クイズ本体 + 問題 + 選択肢を一括作成（MVP: 4択等の選択式、各問題2〜6択、正答は1つ）
-  - `GET /api/quizzes`: クイズ一覧を取得（`q` キーワード検索, `category` 完全一致, `page`/`per_page` ページング）
-  - `GET /api/quizzes/{quiz_id}`: クイズ詳細を取得（問題・選択肢を返却、正答は返さない）
-  - `POST /api/quizzes/{quiz_id}/play`: JWT必須。回答送信・採点・プレイ履歴保存（`quiz_plays`/`quiz_play_answers`）
-  - `GET /api/quizzes/{quiz_id}/rankings`: クイズ単位ランキング（ユーザーごとのベストプレイ採用、同点時は score/correct_count/played_at/play_id で決定）
-  - `GET /api/rankings`: 総合ランキング（ユーザー×クイズのベストスコアを合算、ページング対応）
+  - `POST /api/quizzes`: JWT必須。クイズ本体 + 問題 + 選択肢を下書きとして一括作成（各問題2〜6択、正答は1つ）
+  - `GET /api/quizzes`: `published` のクイズ一覧を取得（`q` キーワード検索, `category` 完全一致, `page`/`per_page` ページング）
+  - `GET /api/quizzes/{quiz_id}`: 公開クイズ詳細を取得。非公開時はJWTで作成者本人のみプレビュー可能（正答は返さない）
+  - `POST /api/quizzes/{quiz_id}/play`: JWT必須。公開中クイズへの回答送信・採点・プレイ履歴保存
+  - `GET /api/quizzes/{quiz_id}/rankings`: 公開中クイズのランキング（ユーザーごとのベストプレイ採用）
+  - `GET /api/rankings`: 現在公開中のクイズだけを対象に、ユーザー×クイズのベストスコアを合算
+  - `GET /api/me/quizzes`: JWT必須。自分が作成したクイズを状態別に取得
+  - `PATCH /api/me/quizzes/{quiz_id}/status`: JWT必須。本人所有クイズの `draft / published / archived` を変更
   - `GET /api/admin/overview`: 管理ダッシュボード向けサマリー（ユーザー数 / クイズ数 / プレイ数 / サービス状況）
   - `GET /api/admin/users`: 管理向けユーザー一覧（emailはマスクした値のみ返却）
   - `GET /api/admin/quizzes`: 管理向けクイズ一覧（作成者・ステータス・プレイ数）
@@ -182,6 +195,7 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
 - Issue: `docs/issues/ISSUE-0018.md`
 - Issue: `docs/issues/ISSUE-0020.md`
 - Issue: `docs/issues/ISSUE-0024.md`
+- Issue: `docs/issues/ISSUE-0026.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -200,6 +214,7 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
 - Qiita下書き: `docs/qiita/ISSUE-0017_vercel_deployment_foundation.md`
 - Qiita下書き: `docs/qiita/ISSUE-0018_public_quiz_experience_ui.md`
 - Qiita下書き: `docs/qiita/ISSUE-0024_quiz_create_ui.md`
+- Qiita下書き: `docs/qiita/ISSUE-0026_quiz_publication_management.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。
