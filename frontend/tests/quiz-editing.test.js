@@ -5,6 +5,9 @@ import { publicApi } from '../src/public/api.js'
 import {
   buildCreateQuizPayload,
   buildQuizDraftFromEditableQuiz,
+  clearEditableQuizDraft,
+  loadEditableQuizDraft,
+  saveEditableQuizDraft,
   validateQuizDraft,
 } from '../src/public/createQuizModel.js'
 
@@ -111,6 +114,74 @@ test('復元した編集内容を更新payloadへ正規化できる', () => {
       },
     ],
   })
+})
+
+test('同じサーバー更新日時なら編集中データを再認証後に復元できる', () => {
+  const storage = createStorage()
+  const draft = buildQuizDraftFromEditableQuiz({
+    title: '未保存の編集',
+    description: '再認証後も残す',
+    category: '復元',
+    questions: [
+      {
+        body: '編集中の問題',
+        explanation: '',
+        choices: [
+          { body: '正解', is_correct: true },
+          { body: '不正解', is_correct: false },
+        ],
+      },
+    ],
+  })
+
+  assert.equal(saveEditableQuizDraft('12', '2026-07-30T00:00:00+00:00', draft, storage), true)
+  const restored = loadEditableQuizDraft('12', '2026-07-30T00:00:00+00:00', storage)
+
+  assert.equal(restored.title, '未保存の編集')
+  assert.equal(restored.questions[0].body, '編集中の問題')
+  assert.equal(restored.questions[0].choices[0].isCorrect, true)
+})
+
+test('サーバー更新日時が変わった古い編集データは復元しない', () => {
+  const storage = createStorage()
+  const draft = buildQuizDraftFromEditableQuiz({
+    title: '古い編集',
+    questions: [
+      {
+        body: '古い問題',
+        choices: [
+          { body: '正解', is_correct: true },
+          { body: '不正解', is_correct: false },
+        ],
+      },
+    ],
+  })
+
+  saveEditableQuizDraft('12', 'old-version', draft, storage)
+
+  assert.equal(loadEditableQuizDraft('12', 'new-version', storage), null)
+  assert.equal(loadEditableQuizDraft('12', 'old-version', storage), null)
+})
+
+test('保存成功後にクイズ別の編集中データを削除できる', () => {
+  const storage = createStorage()
+  const draft = buildQuizDraftFromEditableQuiz({
+    title: '削除対象',
+    questions: [
+      {
+        body: '問題',
+        choices: [
+          { body: '正解', is_correct: true },
+          { body: '不正解', is_correct: false },
+        ],
+      },
+    ],
+  })
+
+  saveEditableQuizDraft('12', 'version', draft, storage)
+  clearEditableQuizDraft('12', storage)
+
+  assert.equal(loadEditableQuizDraft('12', 'version', storage), null)
 })
 
 test('編集データ取得APIへJWT付きGETを送信する', async () => {
