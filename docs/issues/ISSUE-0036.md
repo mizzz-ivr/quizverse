@@ -28,6 +28,8 @@ GitHub公式の`actions/checkout`、`actions/setup-python`、`actions/setup-node
 
 アプリケーションがテスト対象とするNode.jsは従来どおり22を維持する。今回更新するNode.js 24は、GitHub公式Action自体を実行する内部ランタイムである。
 
+GitHub-hosted runnerは必要なActions Runnerバージョンを満たす。self-hosted runnerへ展開する場合は、Node.js 24ランタイム対応Actionの最低Runnerバージョンを事前に確認する。
+
 ### 回帰テスト
 
 `backend/tests/test_ci_actions_runtime.py`を追加し、以下を確認する。
