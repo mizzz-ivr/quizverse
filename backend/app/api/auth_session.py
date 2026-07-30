@@ -1,3 +1,5 @@
+import hmac
+
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import (
     create_access_token,
@@ -89,6 +91,36 @@ def _set_auth_cookies(response, user_id: str, auth_method: str) -> None:
     _set_session_hint(response)
 
 
+def _logout_csrf_is_valid() -> bool:
+    """Allow idempotent cleanup without a session, otherwise require double submit.
+
+    Logout intentionally does not require a valid JWT so an expired access
+    token can still be removed. When a browser session hint exists, the caller
+    must prove same-origin access by echoing either readable CSRF cookie.
+    """
+    if request.cookies.get(_SESSION_HINT_COOKIE) != "1":
+        return True
+
+    header_name = current_app.config["JWT_ACCESS_CSRF_HEADER_NAME"]
+    provided = request.headers.get(header_name)
+    if not provided:
+        return False
+
+    cookie_names = {
+        current_app.config["JWT_ACCESS_CSRF_COOKIE_NAME"],
+        current_app.config["JWT_REFRESH_CSRF_COOKIE_NAME"],
+    }
+    expected_values = [
+        request.cookies.get(cookie_name)
+        for cookie_name in cookie_names
+        if request.cookies.get(cookie_name)
+    ]
+    return any(
+        hmac.compare_digest(provided, expected)
+        for expected in expected_values
+    )
+
+
 @auth_session_bp.after_app_request
 def attach_cookie_session(response):
     """Convert successful browser login responses into cookie sessions.
@@ -172,6 +204,13 @@ def refresh_session():
 
 @auth_session_bp.post("/logout")
 def logout_session():
+    if not _logout_csrf_is_valid():
+        return _error_response(
+            "auth/csrf_failed",
+            "CSRF token is missing or invalid.",
+            401,
+        )
+
     response = jsonify({"status": "logged_out"})
     unset_jwt_cookies(response)
     _clear_session_hint(response)
