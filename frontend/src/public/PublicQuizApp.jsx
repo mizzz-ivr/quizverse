@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { ApiError, clearSession, getStoredSession, publicApi, saveSession } from './api'
 
@@ -408,6 +408,8 @@ function NotFoundPage({ moveTo }) {
 export function PublicQuizApp() {
   const { path, moveTo } = usePublicPath()
   const [session, setSession] = useState(() => getStoredSession())
+  const [logoutError, setLogoutError] = useState('')
+  const logoutInFlight = useRef(false)
 
   useEffect(() => {
     if (!session?.accessToken) return
@@ -424,10 +426,19 @@ export function PublicQuizApp() {
   }, [session?.accessToken])
 
   const onAuthenticated = (payload) => setSession(saveSession(payload))
-  const onLogout = () => {
-    clearSession()
-    setSession(null)
-    moveTo('/')
+  const onLogout = async () => {
+    if (logoutInFlight.current) return
+    logoutInFlight.current = true
+    setLogoutError('')
+    try {
+      await clearSession()
+      setSession(null)
+      moveTo('/')
+    } catch (error) {
+      setLogoutError(`ログアウトできませんでした。${friendlyError(error)} もう一度お試しください。`)
+    } finally {
+      logoutInFlight.current = false
+    }
   }
 
   const page = useMemo(() => {
@@ -443,5 +454,5 @@ export function PublicQuizApp() {
     return <NotFoundPage moveTo={moveTo} />
   }, [path, session])
 
-  return <PublicShell path={path} moveTo={moveTo} session={session} onLogout={onLogout}>{page}</PublicShell>
+  return <PublicShell path={path} moveTo={moveTo} session={session} onLogout={onLogout}>{logoutError ? <div className="mb-6"><Alert>{logoutError}</Alert></div> : null}{page}</PublicShell>
 }
