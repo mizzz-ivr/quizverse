@@ -58,6 +58,7 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 - `/quizzes`
 - `/quizzes/new`
 - `/my/quizzes`
+- `/my/quizzes/{quiz_id}/edit`
 - `/rankings`
 - `/api/health`
 - `/api/status`
@@ -111,7 +112,7 @@ npm --prefix frontend install
 npm --prefix frontend run build
 ```
 
-## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024, ISSUE-0026）
+## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024, ISSUE-0026, ISSUE-0028）
 既存APIへ接続した一般向けMVP画面を実装しています。
 
 - `/`: ホーム・注目クイズ・ランキングプレビュー
@@ -120,11 +121,12 @@ npm --prefix frontend run build
 - `/quizzes`: 公開中クイズの一覧・キーワード検索・カテゴリ絞り込み・ページング
 - `/quizzes/new`: ログイン済みユーザー向けクイズ作成
 - `/my/quizzes`: 自分の下書き・公開中・アーカイブ済みクイズ管理
+- `/my/quizzes/{quiz_id}/edit`: プレイ履歴のない本人所有下書きの編集
 - `/quizzes/{quiz_id}`: 公開クイズの詳細・回答・採点結果、または作成者向け非公開プレビュー
 - `/rankings`: 現在公開中クイズを対象とした総合ランキング
 - `/quizzes/{quiz_id}/rankings`: 公開中クイズのクイズ別ランキング
 
-クイズ作成画面では、タイトル・説明・カテゴリ、1〜50問、各問題2〜6択、正答1件を入力し、JWT付きで `POST /api/quizzes` へ送信します。作成結果は `draft` となり、作成者は詳細画面でプレビューした後、マイクイズ画面から公開できます。
+クイズ作成画面では、タイトル・説明・カテゴリ、1〜50問、各問題2〜6択、正答1件を入力し、JWT付きで `POST /api/quizzes` へ送信します。作成結果は `draft` となり、作成者は詳細画面でプレビューした後、マイクイズ画面から編集・公開できます。
 
 ### クイズ公開ライフサイクル
 
@@ -133,6 +135,8 @@ npm --prefix frontend run build
 - `archived`: 公開終了。作成者だけがプレビュー・再公開可能
 
 非公開クイズへ非作成者がアクセスした場合は、存在を推測させないため404を返します。公開状態の境界は `QUIZ_PUBLICATION_ENFORCED=true` で有効化し、本番では必ず `true` を設定してください。
+
+下書き編集は作成者本人かつプレイ履歴が存在しないクイズだけに限定しています。公開中・アーカイブ済みクイズは直接編集できません。また、一度でもプレイ履歴が保存されたクイズは、過去の採点結果と問題構造の整合性を守るため、下書きへ戻しても編集できません。
 
 MVPの認証情報は次のキーで `localStorage` に保存します。
 
@@ -154,6 +158,8 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
   - `GET /api/quizzes/{quiz_id}/rankings`: 公開中クイズのランキング（ユーザーごとのベストプレイ採用）
   - `GET /api/rankings`: 現在公開中のクイズだけを対象に、ユーザー×クイズのベストスコアを合算
   - `GET /api/me/quizzes`: JWT必須。自分が作成したクイズを状態別に取得
+  - `GET /api/me/quizzes/{quiz_id}`: JWT必須。本人所有かつ編集可能な下書きを正答情報付きで取得
+  - `PUT /api/me/quizzes/{quiz_id}`: JWT必須。本人所有・プレイ履歴なしの下書き内容を一括更新
   - `PATCH /api/me/quizzes/{quiz_id}/status`: JWT必須。本人所有クイズの `draft / published / archived` を変更
   - `GET /api/admin/overview`: 管理ダッシュボード向けサマリー（ユーザー数 / クイズ数 / プレイ数 / サービス状況）
   - `GET /api/admin/users`: 管理向けユーザー一覧（emailはマスクした値のみ返却）
@@ -196,6 +202,7 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
 - Issue: `docs/issues/ISSUE-0020.md`
 - Issue: `docs/issues/ISSUE-0024.md`
 - Issue: `docs/issues/ISSUE-0026.md`
+- Issue: `docs/issues/ISSUE-0028.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -215,6 +222,7 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
 - Qiita下書き: `docs/qiita/ISSUE-0018_public_quiz_experience_ui.md`
 - Qiita下書き: `docs/qiita/ISSUE-0024_quiz_create_ui.md`
 - Qiita下書き: `docs/qiita/ISSUE-0026_quiz_publication_management.md`
+- Qiita下書き: `docs/qiita/ISSUE-0028_draft_quiz_editing.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。
