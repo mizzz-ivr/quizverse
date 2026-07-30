@@ -26,6 +26,9 @@ beforeEach(() => {
   requests = []
   globalThis.localStorage = createLocalStorage()
   globalThis.sessionStorage = createLocalStorage()
+  globalThis.document = {
+    cookie: 'quizverse_session_hint=1; quizverse_csrf_access=management-csrf',
+  }
   globalThis.window = {
     location: {
       origin: 'http://localhost:5173',
@@ -49,40 +52,47 @@ beforeEach(() => {
 
 afterEach(() => {
   delete globalThis.fetch
+  delete globalThis.document
   delete globalThis.localStorage
   delete globalThis.sessionStorage
   delete globalThis.window
 })
 
-test('マイクイズAPIへ状態フィルターとJWTを付けてGETする', async () => {
-  await publicApi.myQuizzes({ status: 'draft', page: 2, perPage: 12 }, 'access-token')
+test('マイクイズAPIへ状態フィルターとCookieを付けてGETする', async () => {
+  await publicApi.myQuizzes({ status: 'draft', page: 2, perPage: 12 }, 'legacy-access-token')
 
   assert.equal(requests.length, 1)
   assert.equal(requests[0].path, '/api/me/quizzes?status=draft&page=2&per_page=12')
   assert.equal(requests[0].options.method, 'GET')
-  assert.equal(requests[0].options.headers.Authorization, 'Bearer access-token')
+  assert.equal(requests[0].options.credentials, 'same-origin')
+  assert.equal(requests[0].options.headers.Authorization, undefined)
 })
 
-test('クイズ状態更新APIへPATCHで状態を送信する', async () => {
-  const payload = await publicApi.updateQuizStatus('7', 'published', 'access-token')
+test('クイズ状態更新APIへCookie・CSRF付きPATCHで状態を送信する', async () => {
+  const payload = await publicApi.updateQuizStatus('7', 'published', 'legacy-access-token')
 
   assert.equal(payload.quiz.status, 'published')
   assert.equal(requests[0].path, '/api/me/quizzes/7/status')
   assert.equal(requests[0].options.method, 'PATCH')
-  assert.equal(requests[0].options.headers.Authorization, 'Bearer access-token')
+  assert.equal(requests[0].options.credentials, 'same-origin')
+  assert.equal(requests[0].options.headers.Authorization, undefined)
+  assert.equal(requests[0].options.headers['X-CSRF-TOKEN'], 'management-csrf')
   assert.deepEqual(JSON.parse(requests[0].options.body), { status: 'published' })
 })
 
-test('公開クイズ詳細はJWTなしで取得する', async () => {
+test('公開クイズ詳細もsame-origin Cookie設定で取得する', async () => {
+  document.cookie = ''
   await publicApi.quiz('7')
 
   assert.equal(requests[0].path, '/api/quizzes/7')
+  assert.equal(requests[0].options.credentials, 'same-origin')
   assert.equal(requests[0].options.headers.Authorization, undefined)
 })
 
-test('作成者プレビューでは明示したJWTを送信する', async () => {
-  await publicApi.quiz('7', 'owner-token')
+test('作成者プレビューはCookieセッションを利用し明示JWTを送信しない', async () => {
+  await publicApi.quiz('7', 'legacy-owner-token')
 
   assert.equal(requests[0].path, '/api/quizzes/7')
-  assert.equal(requests[0].options.headers.Authorization, 'Bearer owner-token')
+  assert.equal(requests[0].options.credentials, 'same-origin')
+  assert.equal(requests[0].options.headers.Authorization, undefined)
 })
