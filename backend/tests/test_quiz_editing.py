@@ -239,29 +239,88 @@ def test_published_and_archived_quizzes_are_not_directly_editable():
     assert archived_get.get_json()["error"]["code"] == "quiz/not_editable"
 
 
-def test_play_submission_locks_quiz_without_allocation_mutex(monkeypatch):
+def test_editable_get_acquires_shared_quiz_lock(monkeypatch):
     _app, client = _create_client()
-    owner_token = _register(client, "lock-owner@example.com", "Lock Owner")
-    player_token = _register(client, "lock-player@example.com", "Lock Player")
+    owner_token = _register(client, "get-lock@example.com", "Get Lock")
+    quiz_id = _create_quiz(client, owner_token)
+    locked_quiz_ids = []
+    original_lock = quiz_editing._lock_quiz_shared
+
+    def tracked_lock(locked_quiz_id):
+        locked_quiz_ids.append(locked_quiz_id)
+        return original_lock(locked_quiz_id)
+
+    monkeypatch.setattr(quiz_editing, "_lock_quiz_shared", tracked_lock)
+
+    response = client.get(
+        f"/api/me/quizzes/{quiz_id}",
+        headers=_auth_header(owner_token),
+    )
+
+    assert response.status_code == 200
+    assert locked_quiz_ids == [int(quiz_id)]
+
+
+def test_draft_update_acquires_allocation_then_exclusive_quiz_lock(monkeypatch):
+    _app, client = _create_client()
+    owner_token = _register(client, "put-lock@example.com", "Put Lock")
+    quiz_id = _create_quiz(client, owner_token)
+    lock_order = []
+    original_allocation_lock = quiz_editing._lock_shared_id_allocation
+    original_exclusive_lock = quiz_editing._lock_quiz_exclusive
+
+    def tracked_allocation_lock():
+        lock_order.append("allocation")
+        return original_allocation_lock()
+
+    def tracked_exclusive_lock(locked_quiz_id):
+        lock_order.append(f"exclusive:{locked_quiz_id}")
+        return original_exclusive_lock(locked_quiz_id)
+
+    monkeypatch.setattr(
+        quiz_editing,
+        "_lock_shared_id_allocation",
+        tracked_allocation_lock,
+    )
+    monkeypatch.setattr(
+        quiz_editing,
+        "_lock_quiz_exclusive",
+        tracked_exclusive_lock,
+    )
+
+    response = client.put(
+        f"/api/me/quizzes/{quiz_id}",
+        headers=_auth_header(owner_token),
+        json=_quiz_payload("ロック確認後の更新"),
+    )
+
+    assert response.status_code == 200
+    assert lock_order == ["allocation", f"exclusive:{quiz_id}"]
+
+
+def test_play_submission_uses_shared_quiz_lock_without_allocation_mutex(monkeypatch):
+    _app, client = _create_client()
+    owner_token = _register(client, "play-lock-owner@example.com", "Play Lock Owner")
+    player_token = _register(client, "play-lock-player@example.com", "Play Lock Player")
     quiz_id = _create_quiz(client, owner_token)
     assert _change_status(client, owner_token, quiz_id, "published").status_code == 200
 
     locked_quiz_ids = []
-    original_quiz_lock = quiz_editing._lock_quiz
+    original_shared_lock = quiz_editing._lock_quiz_shared
 
     def unexpected_allocation_lock():
         raise AssertionError("play submission must not acquire the allocation mutex")
 
-    def tracked_quiz_lock(locked_quiz_id):
+    def tracked_shared_lock(locked_quiz_id):
         locked_quiz_ids.append(locked_quiz_id)
-        return original_quiz_lock(locked_quiz_id)
+        return original_shared_lock(locked_quiz_id)
 
     monkeypatch.setattr(
         quiz_editing,
         "_lock_shared_id_allocation",
         unexpected_allocation_lock,
     )
-    monkeypatch.setattr(quiz_editing, "_lock_quiz", tracked_quiz_lock)
+    monkeypatch.setattr(quiz_editing, "_lock_quiz_shared", tracked_shared_lock)
 
     detail = client.get(f"/api/quizzes/{quiz_id}").get_json()["quiz"]
     question = detail["questions"][0]
