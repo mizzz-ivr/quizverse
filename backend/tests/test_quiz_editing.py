@@ -239,21 +239,31 @@ def test_published_and_archived_quizzes_are_not_directly_editable():
     assert archived_get.get_json()["error"]["code"] == "quiz/not_editable"
 
 
-def test_play_submission_acquires_quiz_lock_before_scoring(monkeypatch):
+def test_play_submission_acquires_shared_then_quiz_lock_before_scoring(monkeypatch):
     _app, client = _create_client()
     owner_token = _register(client, "lock-owner@example.com", "Lock Owner")
     player_token = _register(client, "lock-player@example.com", "Lock Player")
     quiz_id = _create_quiz(client, owner_token)
     assert _change_status(client, owner_token, quiz_id, "published").status_code == 200
 
-    locked_quiz_ids = []
-    original_lock_quiz = quiz_editing._lock_quiz
+    lock_order = []
+    original_shared_lock = quiz_editing._lock_shared_id_allocation_row
+    original_quiz_lock = quiz_editing._lock_quiz
 
-    def tracked_lock(locked_quiz_id):
-        locked_quiz_ids.append(locked_quiz_id)
-        return original_lock_quiz(locked_quiz_id)
+    def tracked_shared_lock():
+        lock_order.append("shared")
+        return original_shared_lock()
 
-    monkeypatch.setattr(quiz_editing, "_lock_quiz", tracked_lock)
+    def tracked_quiz_lock(locked_quiz_id):
+        lock_order.append(f"quiz:{locked_quiz_id}")
+        return original_quiz_lock(locked_quiz_id)
+
+    monkeypatch.setattr(
+        quiz_editing,
+        "_lock_shared_id_allocation_row",
+        tracked_shared_lock,
+    )
+    monkeypatch.setattr(quiz_editing, "_lock_quiz", tracked_quiz_lock)
 
     detail = client.get(f"/api/quizzes/{quiz_id}").get_json()["quiz"]
     question = detail["questions"][0]
@@ -271,4 +281,4 @@ def test_play_submission_acquires_quiz_lock_before_scoring(monkeypatch):
     )
 
     assert response.status_code == 201
-    assert locked_quiz_ids == [int(quiz_id)]
+    assert lock_order == ["shared", f"quiz:{quiz_id}"]
