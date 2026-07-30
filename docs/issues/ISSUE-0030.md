@@ -139,7 +139,12 @@ npm --prefix frontend run build
 
 ## CI確認結果
 
-最新headの実測値をPRマージ前に更新する。
+- フロントエンドテスト: `37 passed, 0 failed`
+- バックエンドテスト: `79 passed, 3 warnings`（9.11秒）
+- Production Build: 成功
+  - JavaScript: 270.89 kB（gzip 74.81 kB）
+  - CSS: 42.80 kB（gzip 7.25 kB）
+  - build: 1.50秒
 
 ## 対象外
 
