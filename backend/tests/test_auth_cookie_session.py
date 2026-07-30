@@ -191,13 +191,29 @@ def test_refresh_cookie_issues_new_access_cookie():
     assert client.get("/api/auth/me").status_code == 200
 
 
-def test_logout_clears_cookie_session():
+def test_logout_rejects_missing_csrf_while_session_exists():
     _app, client = _create_client()
     assert _register(client).status_code == 201
+
+    response = client.post("/api/auth/logout")
+
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "auth/csrf_failed"
     assert client.get_cookie("quizverse_access_token") is not None
     assert client.get_cookie("quizverse_session_hint") is not None
 
-    logout_response = client.post("/api/auth/logout")
+
+def test_logout_clears_cookie_session_with_access_csrf():
+    _app, client = _create_client()
+    assert _register(client).status_code == 201
+    access_csrf = _csrf(client, "quizverse_csrf_access")
+    assert client.get_cookie("quizverse_access_token") is not None
+    assert client.get_cookie("quizverse_session_hint") is not None
+
+    logout_response = client.post(
+        "/api/auth/logout",
+        headers={"X-CSRF-TOKEN": access_csrf},
+    )
 
     assert logout_response.status_code == 200
     assert logout_response.get_json()["status"] == "logged_out"
@@ -205,3 +221,29 @@ def test_logout_clears_cookie_session():
     assert client.get_cookie("quizverse_refresh_token", path="/api/auth/refresh") is None
     assert client.get_cookie("quizverse_session_hint") is None
     assert client.get("/api/auth/me").status_code == 401
+
+
+def test_logout_accepts_refresh_csrf_after_access_cookie_is_gone():
+    _app, client = _create_client()
+    assert _register(client).status_code == 201
+    refresh_csrf = _csrf(client, "quizverse_csrf_refresh")
+    client.delete_cookie("quizverse_access_token", path="/")
+    client.delete_cookie("quizverse_csrf_access", path="/")
+
+    response = client.post(
+        "/api/auth/logout",
+        headers={"X-CSRF-TOKEN": refresh_csrf},
+    )
+
+    assert response.status_code == 200
+    assert client.get_cookie("quizverse_refresh_token", path="/api/auth/refresh") is None
+    assert client.get_cookie("quizverse_session_hint") is None
+
+
+def test_logout_without_session_is_idempotent():
+    _app, client = _create_client()
+
+    response = client.post("/api/auth/logout")
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "logged_out"
