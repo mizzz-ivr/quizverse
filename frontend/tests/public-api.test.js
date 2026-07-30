@@ -3,6 +3,7 @@ import test, { afterEach, beforeEach } from 'node:test'
 
 import {
   ApiError,
+  clearSession,
   getStoredSession,
   publicApi,
   saveSession,
@@ -97,6 +98,24 @@ test('状態変更リクエストへCookie資格情報とaccess CSRFヘッダー
   assert.equal(captured.options.credentials, 'same-origin')
   assert.equal(captured.options.headers['X-CSRF-TOKEN'], 'access-csrf')
   assert.equal(captured.options.headers.Authorization, undefined)
+})
+
+test('access用CSRFがないlogoutではrefresh用CSRFへフォールバックする', async () => {
+  document.cookie = 'quizverse_session_hint=1; quizverse_csrf_refresh=refresh-only-csrf'
+  localStorage.setItem('quizverse_user', JSON.stringify({ id: 1, display_name: 'Logout User' }))
+  let captured
+  globalThis.fetch = async (path, options) => {
+    captured = { path, options }
+    return jsonResponse(200, { status: 'logged_out' })
+  }
+
+  await clearSession()
+
+  assert.equal(captured.path, '/api/auth/logout')
+  assert.equal(captured.options.method, 'POST')
+  assert.equal(captured.options.credentials, 'same-origin')
+  assert.equal(captured.options.headers['X-CSRF-TOKEN'], 'refresh-only-csrf')
+  assert.equal(localStorage.getItem('quizverse_user'), null)
 })
 
 test('同時401はrefreshリクエストを1回だけ共有して元リクエストを再試行する', async () => {
