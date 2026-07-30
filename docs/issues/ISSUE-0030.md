@@ -73,6 +73,8 @@ X-CSRF-TOKEN: <quizverse_csrf_refresh>
 
 access / refresh / CSRF Cookieと`quizverse_session_hint`を削除する。アクセストークンが期限切れの場合でもローカルセッションを終了できるよう、JWT必須にはしない。
 
+`quizverse_session_hint=1`が存在する場合は、`quizverse_csrf_access`または`quizverse_csrf_refresh`のどちらかを`X-CSRF-TOKEN`へ設定する。access Cookieが期限切れ・削除済みでもrefresh用CSRF値で安全にログアウトできる。セッションヒントがない場合は冪等なCookie削除として成功する。
+
 ## フロントエンド再試行
 
 保護APIが401を返した場合、次の順で処理する。
@@ -103,6 +105,7 @@ ISSUE-0028で実装した編集中データは`sessionStorage`へ保存される
 
 - HttpOnlyによりJavaScriptからJWT本体を参照できない
 - CSRF二重送信によりCookie認証の状態変更APIを保護する
+- logoutもセッション存在時はaccessまたはrefresh用CSRF値を要求する
 - access tokenを短命化し、refresh tokenを専用Pathへ限定する
 - JWT CookieとCSRF Cookieはサーバー側ライブラリが同一トークンに紐づけて検証する
 - `quizverse_session_hint`とユーザー表示キャッシュは認証判定の根拠にせず、最終確認は`GET /api/auth/me`で行う
@@ -125,6 +128,9 @@ npm --prefix frontend run build
 - CSRFヘッダーなしの保護POSTを拒否する
 - 正しいCSRFヘッダー付きPOSTを許可する
 - refreshで新しいaccess Cookieを発行する
+- セッション中のlogoutはCSRFなしを拒否する
+- access Cookie消失後はrefresh用CSRFでlogoutできる
+- セッションなしのlogoutは冪等成功する
 - logoutでCookieを削除する
 - `localStorage`へJWTを保存しない
 - 状態変更リクエストへCSRFヘッダーを付ける
@@ -133,12 +139,7 @@ npm --prefix frontend run build
 
 ## CI確認結果
 
-- フロントエンドテスト: `36 passed, 0 failed`
-- バックエンドテスト: `76 passed, 3 warnings`（9.14秒）
-- Production Build: 成功
-  - JavaScript: 270.82 kB（gzip 74.78 kB）
-  - CSS: 42.80 kB（gzip 7.25 kB）
-  - build: 1.35秒
+最新headの実測値をPRマージ前に更新する。
 
 ## 対象外
 
