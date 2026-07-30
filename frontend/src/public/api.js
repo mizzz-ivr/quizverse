@@ -305,9 +305,14 @@ async function request(
       }
     }
 
-    if (response.status === 401 && auth === 'required') {
+    if (!logoutPromise && response.status === 401 && auth === 'required') {
       redirectToLogin(requestRevision)
-    } else if (response.status === 401 && auth === 'optional' && requestRevision === sessionRevision) {
+    } else if (
+      !logoutPromise
+      && response.status === 401
+      && auth === 'optional'
+      && requestRevision === sessionRevision
+    ) {
       invalidateSessionAfterAuthFailure()
     }
 
