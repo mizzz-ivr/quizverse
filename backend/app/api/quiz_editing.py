@@ -7,6 +7,7 @@ from flask_jwt_extended import (
     jwt_required,
     verify_jwt_in_request,
 )
+from sqlalchemy import text
 
 from ..extensions import db
 from ..models import Choice, Question, Quiz, QuizPlay, QuizStatus, User
@@ -21,14 +22,27 @@ quiz_editing_bp = Blueprint("quiz_editing", __name__, url_prefix="/api/me/quizze
 QUIZ_STATUS_UPDATE_PATTERN = re.compile(r"^/api/me/quizzes/(?P<quiz_id>\d+)/status$")
 QUIZ_PLAY_PATTERN = re.compile(r"^/api/quizzes/(?P<quiz_id>\d+)/play$")
 QUIZ_CREATE_PATH = "/api/quizzes"
+ID_ALLOCATION_ADVISORY_LOCK_KEY = 7249820371234
 
 
 def _editing_error(code: str, message: str, status_code: int):
     return jsonify({"error": {"code": code, "message": message}}), status_code
 
 
-def _lock_shared_id_allocation_row():
-    """Serialize the existing MAX(id) + 1 allocation used by quiz mutations."""
+def _lock_shared_id_allocation():
+    """Serialize MAX(id) + 1 allocation without locking an FK target.
+
+    PostgreSQL uses a transaction-scoped advisory lock. SQLite and other test
+    dialects fall back to the first user row because they do not support the
+    PostgreSQL advisory-lock function.
+    """
+    bind = db.session.get_bind()
+    if bind.dialect.name == "postgresql":
+        return db.session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": ID_ALLOCATION_ADVISORY_LOCK_KEY},
+        ).scalar()
+
     return (
         db.session.query(User.id)
         .order_by(User.id.asc())
@@ -51,21 +65,19 @@ def _lock_owned_quiz(quiz_id: int, user_id: int):
 
 @quiz_editing_bp.before_app_request
 def serialize_related_quiz_mutations():
-    """Apply shared row-lock protocols to related quiz mutations.
+    """Apply transaction-scoped locks to related quiz mutations.
 
-    Mutations that can touch question/choice IDs or insert play history acquire
-    the shared user-row mutex before a quiz row. Keeping this order consistent
-    avoids PostgreSQL deadlocks with foreign-key key-share locks.
+    ID-allocating create/edit requests use a PostgreSQL advisory lock. Edit,
+    status, and play requests use the target quiz row lock where required.
     """
     if request.method == "POST" and request.path == QUIZ_CREATE_PATH:
         verify_jwt_in_request()
-        _lock_shared_id_allocation_row()
+        _lock_shared_id_allocation()
         return None
 
     play_match = QUIZ_PLAY_PATTERN.match(request.path)
     if request.method == "POST" and play_match:
         verify_jwt_in_request()
-        _lock_shared_id_allocation_row()
         _lock_quiz(int(play_match.group("quiz_id")))
         return None
 
@@ -180,9 +192,8 @@ def get_editable_quiz(quiz_id: int):
 def update_draft_quiz(quiz_id: int):
     user_id = int(get_jwt_identity())
 
-    # All question/choice ID allocation follows one global lock order first,
-    # then the target quiz row. This prevents cross-quiz MAX(id) + 1 races.
-    _lock_shared_id_allocation_row()
+    # Serialize global manual ID allocation before locking the target quiz.
+    _lock_shared_id_allocation()
     quiz, not_found = _owned_quiz_or_404(quiz_id, user_id, for_update=True)
     if not_found:
         return not_found
