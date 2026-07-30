@@ -2,9 +2,9 @@
 
 ## はじめに
 
-QuizVerseでは、作成したクイズを `draft` として保存し、作成者が確認してから公開します。公開管理の次に必要になったのが、作成後の下書きを修正する機能です。
+QuizVerseでは、作成したクイズを `draft` として保存し、確認後に公開します。公開管理の次に必要になったのが、作成後の下書きを修正する機能です。
 
-更新APIを追加するだけなら簡単ですが、公開後の回答履歴があるクイズの問題や正答を変更すると、過去のスコアと現在の問題内容が一致しなくなります。また、編集・公開・回答送信が同時に動くと、処理途中の問題IDが削除される可能性があります。
+更新APIを追加するだけなら簡単ですが、公開後の回答履歴があるクイズの問題や正答を変更すると、過去のスコアと現在の問題内容が一致しなくなります。また、編集・公開・回答送信が同時に動くと、回答中の問題IDが削除される可能性があります。
 
 今回は次の境界を設けました。
 
@@ -12,8 +12,9 @@ QuizVerseでは、作成したクイズを `draft` として保存し、作成�
 - `draft` だけを編集できる
 - プレイ履歴が1件でもあれば編集できない
 - 問題・選択肢はトランザクション内で全置換する
-- 編集・状態変更・プレイ送信を対象クイズ行ロックで直列化する
-- 手動ID採番をPostgreSQL advisory lockで直列化する
+- 編集GETとプレイ送信はクイズ単位のshared lockを使う
+- 編集PUTと状態変更PATCHは同じキーのexclusive lockを使う
+- 手動ID採番を別のadvisory lockで直列化する
 - 初期読み込み失敗時は編集フォームを表示しない
 - JWT期限切れ後も同じタブ内の未保存編集を復元する
 
@@ -28,9 +29,9 @@ PUT /api/me/quizzes/{quiz_id}
 
 一般公開のクイズ詳細APIは正答を返しません。編集フォームには現在の正答設定が必要なため、本人向けGETだけが `is_correct` を返します。
 
-## 所有者を404で判定し、PUT時だけ行ロックする
+## 所有者を404で判定する
 
-本人所有ではないクイズには403ではなく404を返します。GETでは通常取得し、PUTでは編集可能性を確認する前に行ロックを取得します。
+本人所有ではないクイズには403ではなく404を返します。
 
 ```python
 def _owned_quiz_or_404(
@@ -56,17 +57,7 @@ def _owned_quiz_or_404(
     return quiz, None
 ```
 
-PUTでは `for_update=True` を指定します。
-
-```python
-quiz, not_found = _owned_quiz_or_404(
-    quiz_id,
-    user_id,
-    for_update=True,
-)
-```
-
-これにより、編集可能性の確認からcommitまで対象クイズ行をロックできます。
+PUTではロック取得後に `for_update=True` で再取得し、最新状態を検証します。
 
 ## 編集可能条件を共通化する
 
@@ -109,10 +100,6 @@ elif not isinstance(payload, dict):
         "Request body must be a JSON object.",
         400,
     )
-
-validated, validation_error = _validate_create_quiz_payload(payload)
-if validation_error:
-    return validation_error
 ```
 
 配列・文字列・数値のJSONもHTML 500ではなく、統一されたJSON 400で返せます。
@@ -141,36 +128,13 @@ except Exception:
     db.session.rollback()
 ```
 
-入力検証を完了してから削除を始め、途中で失敗した場合はロールバックします。
-
 全置換では問題IDが変わるため、プレイ履歴があるクイズには利用しません。
 
-## 編集・公開・プレイを同じクイズ行ロックで直列化する
-
-次の3処理は、状態や問題を確認する前に対象クイズ行へ `SELECT ... FOR UPDATE` を行います。
-
-```text
-編集PUT                  状態変更PATCH              プレイ送信POST
-   │                          │                          │
-   ├─ Quiz行をFOR UPDATE      ├─ Quiz行をFOR UPDATE      ├─ Quiz行をFOR UPDATE
-   ├─ draft / 履歴確認         ├─ 状態 / 公開条件確認      ├─ 公開状態・問題確認
-   ├─ 全置換                  ├─ 状態更新                ├─ 採点・履歴保存
-   └─ commit                  └─ commit                  └─ commit
-```
-
-どれか1つがロックを取得すると、同じクイズを扱うほかの処理はcommitまで待機します。
-
-- 進行中プレイが先なら、履歴保存後に編集が再確認して409
-- 編集が先なら、プレイは編集完了後の公開状態を再確認
-- 状態変更と編集も、確定済みの最新状態を前提に検証
-
-これにより、回答送信中の問題IDを編集処理が削除する競合を防げます。
-
-## `MAX(id) + 1` 採番をadvisory lockで直列化する
+## 採番用advisory lock
 
 既存実装は問題・選択肢IDを `MAX(id) + 1` で採番しています。異なるクイズを同時作成・同時編集すると、同じ次IDを算出する可能性があります。
 
-外部キー参照先の行を共有ロックに使うと、別処理のFK確認と循環待機してデッドロックになる可能性があります。そこでPostgreSQLのトランザクション単位advisory lockを利用します。
+そこでPostgreSQLのトランザクション単位advisory lockを利用します。
 
 ```python
 from sqlalchemy import text
@@ -179,8 +143,7 @@ ID_ALLOCATION_ADVISORY_LOCK_KEY = 7249820371234
 
 
 def _lock_shared_id_allocation():
-    bind = db.session.get_bind()
-    if bind.dialect.name == "postgresql":
+    if db.session.get_bind().dialect.name == "postgresql":
         return db.session.execute(
             text("SELECT pg_advisory_xact_lock(:lock_key)"),
             {"lock_key": ID_ALLOCATION_ADVISORY_LOCK_KEY},
@@ -195,11 +158,63 @@ def _lock_shared_id_allocation():
     )
 ```
 
-クイズ作成POSTと編集PUTだけが、採番前に同じadvisory lockを取得します。ロックはトランザクション終了時に自動解放されます。
-
-プレイ送信は問題・選択肢IDを採番しないためadvisory lockを取得せず、対象クイズ行だけをロックします。これにより通常のプレイ送信同士を不要に直列化せず、FK参照先の行ロックとのデッドロックも回避できます。
+クイズ作成POSTと編集PUTだけが、採番前にこのロックを取得します。外部キー参照先の行を共有ロックに使わないため、FK確認との循環待機を防げます。
 
 恒久的にはPostgreSQLのsequence / identityへ移行する方が自然です。
+
+## クイズ単位のshared / exclusive advisory lock
+
+プレイ送信を通常の `SELECT ... FOR UPDATE` で保護すると、同じ人気クイズへの全プレイが1件ずつ直列化されます。
+
+そこで、クイズIDから専用キーを作り、PostgreSQLのshared / exclusive advisory lockを使います。
+
+```python
+QUIZ_ADVISORY_LOCK_BASE = 8_000_000_000_000_000
+
+
+def _quiz_advisory_lock_key(quiz_id: int) -> int:
+    return QUIZ_ADVISORY_LOCK_BASE + quiz_id
+
+
+def _lock_quiz_shared(quiz_id: int):
+    return db.session.execute(
+        text("SELECT pg_advisory_xact_lock_shared(:lock_key)"),
+        {"lock_key": _quiz_advisory_lock_key(quiz_id)},
+    ).scalar()
+
+
+def _lock_quiz_exclusive(quiz_id: int):
+    return db.session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_key)"),
+        {"lock_key": _quiz_advisory_lock_key(quiz_id)},
+    ).scalar()
+```
+
+利用規約は次の通りです。
+
+```text
+編集GET      shared lock
+プレイ送信   shared lock
+編集PUT      exclusive lock + Quiz行FOR UPDATE
+状態変更     exclusive lock + Quiz行FOR UPDATE
+```
+
+shared lock同士は共存できるため、同じクイズへの複数プレイ送信は並行実行できます。一方、編集・状態変更はexclusive lockを取得するため、進行中のプレイや編集GETが完了するまで待機します。
+
+```text
+編集GET             プレイ送信              編集PUT / 状態変更
+   │                    │                          │
+   ├─ shared lock       ├─ shared lock             ├─ exclusive lock
+   ├─ 再取得・直列化     ├─ 採点・履歴保存           ├─ 最新状態を再取得
+   └─ response          └─ commit                  └─ 更新・commit
+```
+
+これにより、次を同時に満たせます。
+
+- 更新途中のクイズ本体・問題・選択肢がGETレスポンス内で混在しない
+- 回答中の問題IDを編集処理が削除しない
+- 複数プレイ送信は互いにブロックしない
+- 編集・状態変更は最新状態を前提に再検証する
 
 ## React側でAPIデータをフォームモデルへ変換する
 
@@ -227,7 +242,7 @@ export function buildQuizDraftFromEditableQuiz(quiz) {
 
 ## 読み込み失敗時に空フォームを出さない
 
-編集画面の初期値は空のフォームモデルです。API取得に失敗したままフォームを表示すると、既存データと誤認して上書きする危険があります。
+API取得に失敗したまま初期空フォームを表示すると、既存データと誤認して上書きする危険があります。
 
 ```text
 loading  : 読み込み中
@@ -239,25 +254,19 @@ loadError: 取得失敗
 
 ## JWT期限切れ後も未保存編集を復元する
 
-PUT送信時にJWTが期限切れになると、共通APIクライアントはセッションを削除してログイン画面へ遷移します。そこでクイズIDごとのキーで `sessionStorage` へフォームを一時保存します。
+クイズIDごとのキーで `sessionStorage` へフォームを一時保存します。
 
 ```text
 quizverse_quiz_edit_draft:{quiz_id}
 ```
 
-一時保存には、フォーム値と編集APIから取得した `updated_at` を含めます。
-
-```javascript
-saveEditableQuizDraft(quizId, serverUpdatedAt, draft)
-```
-
-再認証後はサーバーから最新データを取得し、次のように判定します。
+一時保存にはフォーム値と編集APIから取得した `updated_at` を含めます。
 
 - 一時保存時とサーバーの `updated_at` が一致: 未保存編集を復元
 - 一致しない: 古い一時保存を破棄
 - PUT成功: 一時保存を削除
 
-これにより、期限切れ時のデータ損失を防ぎつつ、古いローカルデータで新しいサーバー状態を上書きしません。
+これにより、JWT期限切れ時のデータ損失を防ぎつつ、古いローカルデータで新しいサーバー状態を上書きしません。
 
 ## テスト方針
 
@@ -269,8 +278,9 @@ saveEditableQuizDraft(quizId, serverUpdatedAt, draft)
 - 入力不正時に既存内容が残る
 - 非オブジェクトJSONはJSON形式の400
 - published / archivedは409
-- プレイ送信前に対象クイズ行ロックを取得する
-- プレイ送信は採番advisory lockを取得しない
+- 編集GETがshared lockを取得する
+- 編集PUTが採番lockの後にexclusive quiz lockを取得する
+- プレイ送信はshared quiz lockを使い、採番lockを取得しない
 
 フロントエンドでは次を確認します。
 
@@ -283,6 +293,6 @@ saveEditableQuizDraft(quizId, serverUpdatedAt, draft)
 
 ## まとめ
 
-編集機能では「更新できること」だけでなく、「過去の結果を壊さないこと」と「競合時に古い状態を公開・採点しないこと」が重要です。
+編集機能では「更新できること」だけでなく、「過去の結果を壊さないこと」「一貫したスナップショットを返すこと」「人気クイズのプレイ性能を落とさないこと」が重要です。
 
-MVPでは、draft限定・プレイ履歴なし・全置換・クイズ行ロック・採番advisory lock・再認証用一時保存によって、実装の単純さと履歴の整合性を両立しました。将来はクイズの版管理とDB sequence / identityへ拡張できます。
+MVPでは、draft限定・プレイ履歴なし・全置換・採番advisory lock・クイズ単位のshared/exclusive advisory lock・再認証用一時保存によって、履歴の整合性と並行性を両立しました。
