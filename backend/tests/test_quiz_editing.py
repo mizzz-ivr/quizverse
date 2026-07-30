@@ -1,5 +1,6 @@
 from app import create_app
 from app.extensions import db
+import app.api.quiz_editing as quiz_editing
 
 
 class TestConfig:
@@ -186,6 +187,30 @@ def test_invalid_update_keeps_existing_content():
     assert current["questions"][0]["body"] == "編集前の問題"
 
 
+def test_non_object_update_payload_returns_json_validation_error():
+    _app, client = _create_client()
+    owner_token = _register(client, "payload@example.com", "Payload")
+    quiz_id = _create_quiz(client, owner_token)
+
+    response = client.put(
+        f"/api/me/quizzes/{quiz_id}",
+        headers=_auth_header(owner_token),
+        json=[{"title": "配列は不可"}],
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+    assert response.get_json()["error"] == {
+        "code": "quiz/validation_error",
+        "message": "Request body must be a JSON object.",
+    }
+    current = client.get(
+        f"/api/me/quizzes/{quiz_id}",
+        headers=_auth_header(owner_token),
+    ).get_json()["quiz"]
+    assert current["title"] == "編集前クイズ"
+
+
 def test_published_and_archived_quizzes_are_not_directly_editable():
     _app, client = _create_client()
     owner_token = _register(client, "status@example.com", "Status")
@@ -212,3 +237,38 @@ def test_published_and_archived_quizzes_are_not_directly_editable():
     )
     assert archived_get.status_code == 409
     assert archived_get.get_json()["error"]["code"] == "quiz/not_editable"
+
+
+def test_play_submission_acquires_quiz_lock_before_scoring(monkeypatch):
+    _app, client = _create_client()
+    owner_token = _register(client, "lock-owner@example.com", "Lock Owner")
+    player_token = _register(client, "lock-player@example.com", "Lock Player")
+    quiz_id = _create_quiz(client, owner_token)
+    assert _change_status(client, owner_token, quiz_id, "published").status_code == 200
+
+    locked_quiz_ids = []
+    original_lock_quiz = quiz_editing._lock_quiz
+
+    def tracked_lock(locked_quiz_id):
+        locked_quiz_ids.append(locked_quiz_id)
+        return original_lock_quiz(locked_quiz_id)
+
+    monkeypatch.setattr(quiz_editing, "_lock_quiz", tracked_lock)
+
+    detail = client.get(f"/api/quizzes/{quiz_id}").get_json()["quiz"]
+    question = detail["questions"][0]
+    response = client.post(
+        f"/api/quizzes/{quiz_id}/play",
+        headers=_auth_header(player_token),
+        json={
+            "answers": [
+                {
+                    "question_id": question["id"],
+                    "selected_choice_id": question["choices"][0]["id"],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 201
+    assert locked_quiz_ids == [int(quiz_id)]
