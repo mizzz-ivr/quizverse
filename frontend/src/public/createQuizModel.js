@@ -11,6 +11,7 @@ export const QUIZ_LIMITS = {
 }
 
 export const QUIZ_DRAFT_KEY = 'quizverse_quiz_create_draft'
+export const QUIZ_EDIT_DRAFT_KEY_PREFIX = 'quizverse_quiz_edit_draft:'
 
 let fallbackSequence = 0
 
@@ -55,6 +56,24 @@ export function createInitialQuizDraft() {
   }
 }
 
+function normalizeStoredDraft(parsed) {
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+    return null
+  }
+
+  return {
+    title: typeof parsed.title === 'string' ? parsed.title : '',
+    description: typeof parsed.description === 'string' ? parsed.description : '',
+    category: typeof parsed.category === 'string' ? parsed.category : '',
+    questions: parsed.questions.slice(0, QUIZ_LIMITS.questions).map((question) => createQuestion({
+      ...question,
+      choices: Array.isArray(question?.choices)
+        ? question.choices.slice(0, QUIZ_LIMITS.maxChoices)
+        : undefined,
+    })),
+  }
+}
+
 export function saveQuizDraft(draft, storage = globalThis.sessionStorage) {
   try {
     storage?.setItem?.(QUIZ_DRAFT_KEY, JSON.stringify(draft))
@@ -68,23 +87,7 @@ export function loadQuizDraft(storage = globalThis.sessionStorage) {
   try {
     const rawDraft = storage?.getItem?.(QUIZ_DRAFT_KEY)
     if (!rawDraft) return createInitialQuizDraft()
-
-    const parsed = JSON.parse(rawDraft)
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
-      return createInitialQuizDraft()
-    }
-
-    return {
-      title: typeof parsed.title === 'string' ? parsed.title : '',
-      description: typeof parsed.description === 'string' ? parsed.description : '',
-      category: typeof parsed.category === 'string' ? parsed.category : '',
-      questions: parsed.questions.slice(0, QUIZ_LIMITS.questions).map((question) => createQuestion({
-        ...question,
-        choices: Array.isArray(question?.choices)
-          ? question.choices.slice(0, QUIZ_LIMITS.maxChoices)
-          : undefined,
-      })),
-    }
+    return normalizeStoredDraft(JSON.parse(rawDraft)) ?? createInitialQuizDraft()
   } catch {
     return createInitialQuizDraft()
   }
@@ -93,6 +96,56 @@ export function loadQuizDraft(storage = globalThis.sessionStorage) {
 export function clearQuizDraft(storage = globalThis.sessionStorage) {
   try {
     storage?.removeItem?.(QUIZ_DRAFT_KEY)
+  } catch {
+    // Storage can be unavailable in privacy-restricted environments.
+  }
+}
+
+function editableDraftKey(quizId) {
+  return `${QUIZ_EDIT_DRAFT_KEY_PREFIX}${quizId}`
+}
+
+export function saveEditableQuizDraft(
+  quizId,
+  serverUpdatedAt,
+  draft,
+  storage = globalThis.sessionStorage,
+) {
+  if (!quizId || !serverUpdatedAt) return false
+  try {
+    storage?.setItem?.(editableDraftKey(quizId), JSON.stringify({
+      serverUpdatedAt,
+      draft,
+    }))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function loadEditableQuizDraft(
+  quizId,
+  serverUpdatedAt,
+  storage = globalThis.sessionStorage,
+) {
+  if (!quizId || !serverUpdatedAt) return null
+  try {
+    const rawDraft = storage?.getItem?.(editableDraftKey(quizId))
+    if (!rawDraft) return null
+    const parsed = JSON.parse(rawDraft)
+    if (parsed?.serverUpdatedAt !== serverUpdatedAt) {
+      storage?.removeItem?.(editableDraftKey(quizId))
+      return null
+    }
+    return normalizeStoredDraft(parsed.draft)
+  } catch {
+    return null
+  }
+}
+
+export function clearEditableQuizDraft(quizId, storage = globalThis.sessionStorage) {
+  try {
+    storage?.removeItem?.(editableDraftKey(quizId))
   } catch {
     // Storage can be unavailable in privacy-restricted environments.
   }
