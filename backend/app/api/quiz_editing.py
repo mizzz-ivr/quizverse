@@ -53,8 +53,9 @@ def _lock_owned_quiz(quiz_id: int, user_id: int):
 def serialize_related_quiz_mutations():
     """Apply shared row-lock protocols to related quiz mutations.
 
-    Flask executes this guard in the request-scoped SQLAlchemy session, so locks
-    remain held until the target route commits or the request is rolled back.
+    Mutations that can touch question/choice IDs or insert play history acquire
+    the shared user-row mutex before a quiz row. Keeping this order consistent
+    avoids PostgreSQL deadlocks with foreign-key key-share locks.
     """
     if request.method == "POST" and request.path == QUIZ_CREATE_PATH:
         verify_jwt_in_request()
@@ -64,6 +65,7 @@ def serialize_related_quiz_mutations():
     play_match = QUIZ_PLAY_PATTERN.match(request.path)
     if request.method == "POST" and play_match:
         verify_jwt_in_request()
+        _lock_shared_id_allocation_row()
         _lock_quiz(int(play_match.group("quiz_id")))
         return None
 
