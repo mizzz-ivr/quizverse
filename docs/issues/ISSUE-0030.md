@@ -101,6 +101,8 @@ ISSUE-0028で実装した編集中データは`sessionStorage`へ保存される
 - `JWT_COOKIE_DOMAIN`
 - `AUTH_EXPOSE_TOKEN_IN_RESPONSE`（本番: `false`）
 
+`.env.example`へ設定例を追加し、`docker-compose.yml`のbackend serviceでも同じ値を明示的に転送する。設定追加時の転送漏れは`backend/tests/test_docker_compose_auth_env.py`で検知する。
+
 ## セキュリティ境界
 
 - HttpOnlyによりJavaScriptからJWT本体を参照できない
@@ -136,11 +138,12 @@ npm --prefix frontend run build
 - 状態変更リクエストへCSRFヘッダーを付ける
 - 同時401でrefreshを1回だけ実行する
 - refresh失敗時に復帰先付きログインへ遷移する
+- Docker ComposeがCookie認証環境変数をbackendへ転送する
 
 ## CI確認結果
 
 - フロントエンドテスト: `37 passed, 0 failed`
-- バックエンドテスト: `79 passed, 3 warnings`（9.11秒）
+- バックエンドテスト: `80 passed, 3 warnings`（9.50秒）
 - Production Build: 成功
   - JavaScript: 270.89 kB（gzip 74.81 kB）
   - CSS: 42.80 kB（gzip 7.25 kB）
