@@ -2,6 +2,8 @@ from flask import Flask
 
 from .api.admin import admin_bp
 from .api.auth import auth_bp
+from .api.auth_session import auth_session_bp
+from .api import auth_origin_guard  # noqa: F401
 from .api.health import health_bp
 from .api.quiz_editing import quiz_editing_bp
 from .api.quiz_management import quiz_management_bp
@@ -24,6 +26,7 @@ def create_app(config_class=Config):
     app.register_blueprint(health_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(auth_session_bp)
     app.register_blueprint(quiz_editing_bp)
     app.register_blueprint(quiz_management_bp)
     app.register_blueprint(quizzes_bp)

@@ -17,6 +17,9 @@ function createLocalStorage() {
 beforeEach(() => {
   requestRecord = null
   globalThis.localStorage = createLocalStorage()
+  globalThis.document = {
+    cookie: 'quizverse_session_hint=1; quizverse_csrf_access=create-csrf',
+  }
   globalThis.window = {
     location: {
       origin: 'http://localhost:5173',
@@ -37,11 +40,12 @@ beforeEach(() => {
 
 afterEach(() => {
   delete globalThis.fetch
+  delete globalThis.document
   delete globalThis.localStorage
   delete globalThis.window
 })
 
-test('クイズ作成APIへJWTと入力payloadをPOSTする', async () => {
+test('クイズ作成APIへCookie・CSRFと入力payloadをPOSTする', async () => {
   const quiz = {
     title: 'APIテスト',
     description: null,
@@ -58,12 +62,14 @@ test('クイズ作成APIへJWTと入力payloadをPOSTする', async () => {
     ],
   }
 
-  const payload = await publicApi.createQuiz(quiz, 'access-token')
+  const payload = await publicApi.createQuiz(quiz, 'legacy-access-token')
 
   assert.equal(payload.quiz.id, '42')
   assert.equal(requestRecord.path, '/api/quizzes')
   assert.equal(requestRecord.options.method, 'POST')
-  assert.equal(requestRecord.options.headers.Authorization, 'Bearer access-token')
+  assert.equal(requestRecord.options.credentials, 'same-origin')
+  assert.equal(requestRecord.options.headers.Authorization, undefined)
+  assert.equal(requestRecord.options.headers['X-CSRF-TOKEN'], 'create-csrf')
   assert.equal(requestRecord.options.headers['Content-Type'], 'application/json')
   assert.deepEqual(JSON.parse(requestRecord.options.body), quiz)
 })

@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import test, { afterEach, beforeEach } from 'node:test'
 
-import { ApiError, publicApi, saveSession } from '../src/public/api.js'
+import {
+  ApiError,
+  clearSession,
+  getStoredSession,
+  publicApi,
+  removeLegacyAuthToken,
+  saveSession,
+} from '../src/public/api.js'
 
 let assignedPath
 let reloadCount
@@ -24,11 +31,26 @@ function jsonResponse(status, payload) {
   }
 }
 
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+async function nextMicrotask() {
+  await new Promise((resolve) => queueMicrotask(resolve))
+}
+
 beforeEach(() => {
   assignedPath = null
   reloadCount = 0
   globalThis.localStorage = createStorage()
   globalThis.sessionStorage = createStorage()
+  globalThis.document = { cookie: '' }
   globalThis.window = {
     location: {
       origin: 'http://localhost:5173',
@@ -46,24 +68,271 @@ beforeEach(() => {
 
 afterEach(() => {
   delete globalThis.fetch
+  delete globalThis.document
   delete globalThis.localStorage
   delete globalThis.sessionStorage
   delete globalThis.window
 })
 
-test('認証付きリクエストが401の場合は保存セッションを破棄して復帰先付きログインへ遷移する', async () => {
-  saveSession({
-    access_token: 'expired-token',
-    user: { id: 1, display_name: 'Expired User' },
+test('セッション保存時にJWT文字列をlocalStorageへ保存しない', () => {
+  document.cookie = 'quizverse_session_hint=1'
+
+  const session = saveSession({
+    access_token: 'must-not-be-stored',
+    user: { id: 1, display_name: 'Cookie User' },
   })
-  globalThis.fetch = async () => jsonResponse(401, {
-    error: { code: 'auth/invalid_token', message: 'Token expired' },
+
+  assert.equal(localStorage.getItem('quizverse_access_token'), null)
+  assert.equal(JSON.parse(localStorage.getItem('quizverse_user')).display_name, 'Cookie User')
+  assert.equal(session.accessToken, 'cookie-session')
+  assert.equal(getStoredSession().accessToken, 'cookie-session')
+})
+
+test('共有起動処理から旧JWTキーを削除できる', () => {
+  localStorage.setItem('quizverse_access_token', 'legacy-token')
+  localStorage.setItem('quizverse_user', JSON.stringify({ id: 1 }))
+
+  removeLegacyAuthToken()
+
+  assert.equal(localStorage.getItem('quizverse_access_token'), null)
+  assert.notEqual(localStorage.getItem('quizverse_user'), null)
+})
+
+test('セッションヒントCookieがない場合は表示キャッシュを認証状態として扱わない', () => {
+  localStorage.setItem('quizverse_user', JSON.stringify({ id: 1, display_name: 'Stale User' }))
+  localStorage.setItem('quizverse_access_token', 'legacy-token')
+
+  const session = getStoredSession()
+
+  assert.equal(session, null)
+  assert.equal(localStorage.getItem('quizverse_access_token'), null)
+  assert.equal(localStorage.getItem('quizverse_user'), null)
+})
+
+test('状態変更リクエストへCookie資格情報とaccess CSRFヘッダーを付与する', async () => {
+  document.cookie = 'quizverse_session_hint=1; quizverse_csrf_access=access-csrf'
+  let captured
+  globalThis.fetch = async (path, options) => {
+    captured = { path, options }
+    return jsonResponse(201, { quiz: { id: 10, title: 'Cookie Quiz' } })
+  }
+
+  await publicApi.createQuiz({ title: 'Cookie Quiz', questions: [] }, 'legacy-token')
+
+  assert.equal(captured.path, '/api/quizzes')
+  assert.equal(captured.options.credentials, 'same-origin')
+  assert.equal(captured.options.headers['X-CSRF-TOKEN'], 'access-csrf')
+  assert.equal(captured.options.headers.Authorization, undefined)
+})
+
+test('access用CSRFがないlogoutではrefresh用CSRFへフォールバックする', async () => {
+  document.cookie = 'quizverse_session_hint=1; quizverse_csrf_refresh=refresh-only-csrf'
+  localStorage.setItem('quizverse_user', JSON.stringify({ id: 1, display_name: 'Logout User' }))
+  let captured
+  globalThis.fetch = async (path, options) => {
+    captured = { path, options }
+    return jsonResponse(200, { status: 'logged_out' })
+  }
+
+  await clearSession()
+
+  assert.equal(captured.path, '/api/auth/logout')
+  assert.equal(captured.options.method, 'POST')
+  assert.equal(captured.options.credentials, 'same-origin')
+  assert.equal(captured.options.headers['X-CSRF-TOKEN'], 'refresh-only-csrf')
+  assert.equal(localStorage.getItem('quizverse_user'), null)
+})
+
+test('logout失敗時はローカル表示セッションを保持して再試行可能にする', async () => {
+  document.cookie = 'quizverse_session_hint=1; quizverse_csrf_access=logout-csrf'
+  saveSession({ user: { id: 1, display_name: 'Shared Device User' } }, { redirect: false })
+  globalThis.fetch = async () => jsonResponse(503, {
+    error: { code: 'auth/logout_failed', message: 'Temporary failure' },
   })
 
   await assert.rejects(
-    () => publicApi.me('expired-token'),
+    () => clearSession(),
+    (error) => error instanceof ApiError && error.status === 503,
+  )
+
+  assert.equal(
+    JSON.parse(localStorage.getItem('quizverse_user')).display_name,
+    'Shared Device User',
+  )
+})
+
+test('同時401はrefreshリクエストを1回だけ共有して元リクエストを再試行する', async () => {
+  document.cookie = [
+    'quizverse_session_hint=1',
+    'quizverse_csrf_access=access-csrf',
+    'quizverse_csrf_refresh=refresh-csrf',
+  ].join('; ')
+  saveSession({ user: { id: 1, display_name: 'Refresh User' } }, { redirect: false })
+
+  let meCalls = 0
+  let refreshCalls = 0
+  let refreshOptions
+  globalThis.fetch = async (path, options) => {
+    if (path === '/api/auth/refresh') {
+      refreshCalls += 1
+      refreshOptions = options
+      await nextMicrotask()
+      return jsonResponse(200, {
+        status: 'refreshed',
+        user: { id: 1, display_name: 'Refresh User' },
+      })
+    }
+    if (path === '/api/auth/me') {
+      meCalls += 1
+      if (meCalls <= 2) {
+        return jsonResponse(401, {
+          error: { code: 'auth/token_expired', message: 'Token expired' },
+        })
+      }
+      return jsonResponse(200, {
+        user: { id: 1, display_name: 'Refresh User' },
+      })
+    }
+    throw new Error(`unexpected path: ${path}`)
+  }
+
+  const [first, second] = await Promise.all([publicApi.me(), publicApi.me()])
+
+  assert.equal(first.user.display_name, 'Refresh User')
+  assert.equal(second.user.display_name, 'Refresh User')
+  assert.equal(refreshCalls, 1)
+  assert.equal(meCalls, 4)
+  assert.equal(refreshOptions.credentials, 'same-origin')
+  assert.equal(refreshOptions.headers['X-CSRF-TOKEN'], 'refresh-csrf')
+})
+
+test('refresh完了後に遅れて返った401は二重refreshせず直接再試行する', async () => {
+  document.cookie = [
+    'quizverse_session_hint=1',
+    'quizverse_csrf_access=access-csrf',
+    'quizverse_csrf_refresh=refresh-csrf',
+  ].join('; ')
+  saveSession({ user: { id: 1, display_name: 'Staggered User' } }, { redirect: false })
+
+  const delayed401 = deferred()
+  let meCalls = 0
+  let refreshCalls = 0
+  globalThis.fetch = async (path) => {
+    if (path === '/api/auth/refresh') {
+      refreshCalls += 1
+      return jsonResponse(200, {
+        status: 'refreshed',
+        user: { id: 1, display_name: 'Staggered User' },
+      })
+    }
+    if (path === '/api/auth/me') {
+      meCalls += 1
+      if (meCalls === 1) {
+        return jsonResponse(401, {
+          error: { code: 'auth/token_expired', message: 'Token expired' },
+        })
+      }
+      if (meCalls === 2) return delayed401.promise
+      return jsonResponse(200, {
+        user: { id: 1, display_name: 'Staggered User' },
+      })
+    }
+    throw new Error(`unexpected path: ${path}`)
+  }
+
+  const first = publicApi.me()
+  const second = publicApi.me()
+  await first
+  delayed401.resolve(jsonResponse(401, {
+    error: { code: 'auth/token_expired', message: 'Delayed token expiry' },
+  }))
+  await second
+
+  assert.equal(refreshCalls, 1)
+  assert.equal(meCalls, 4)
+})
+
+test('refresh処理中のlogoutはrefresh完了後にCookie削除を実行する', async () => {
+  document.cookie = [
+    'quizverse_session_hint=1',
+    'quizverse_csrf_access=access-csrf',
+    'quizverse_csrf_refresh=refresh-csrf',
+  ].join('; ')
+  saveSession({ user: { id: 1, display_name: 'Concurrent Logout' } }, { redirect: false })
+
+  const refreshResponse = deferred()
+  const refreshStarted = deferred()
+  const sequence = []
+  let meCalls = 0
+  globalThis.fetch = async (path) => {
+    if (path === '/api/auth/me') {
+      meCalls += 1
+      if (meCalls === 1) {
+        return jsonResponse(401, {
+          error: { code: 'auth/token_expired', message: 'Token expired' },
+        })
+      }
+      return jsonResponse(200, { user: { id: 1 } })
+    }
+    if (path === '/api/auth/refresh') {
+      sequence.push('refresh-request')
+      refreshStarted.resolve()
+      return refreshResponse.promise
+    }
+    if (path === '/api/auth/logout') {
+      sequence.push('logout-request')
+      return jsonResponse(200, { status: 'logged_out' })
+    }
+    throw new Error(`unexpected path: ${path}`)
+  }
+
+  const protectedRequest = publicApi.me()
+  await refreshStarted.promise
+  const logout = clearSession()
+  await nextMicrotask()
+  assert.deepEqual(sequence, ['refresh-request'])
+
+  refreshResponse.resolve(jsonResponse(200, {
+    status: 'refreshed',
+    user: { id: 1, display_name: 'Concurrent Logout' },
+  }))
+
+  await logout
+  await assert.rejects(protectedRequest, ApiError)
+  assert.deepEqual(sequence, ['refresh-request', 'logout-request'])
+  assert.equal(localStorage.getItem('quizverse_user'), null)
+})
+
+test('refresh失敗時は表示キャッシュを破棄して復帰先付きログインへ遷移する', async () => {
+  document.cookie = [
+    'quizverse_session_hint=1',
+    'quizverse_csrf_access=access-csrf',
+    'quizverse_csrf_refresh=refresh-csrf',
+  ].join('; ')
+  saveSession({ user: { id: 1, display_name: 'Expired User' } }, { redirect: false })
+
+  globalThis.fetch = async (path) => {
+    if (path === '/api/auth/me') {
+      return jsonResponse(401, {
+        error: { code: 'auth/token_expired', message: 'Token expired' },
+      })
+    }
+    if (path === '/api/auth/refresh') {
+      return jsonResponse(401, {
+        error: { code: 'auth/missing_token', message: 'Refresh expired' },
+      })
+    }
+    if (path === '/api/auth/logout') {
+      return jsonResponse(200, { status: 'logged_out' })
+    }
+    throw new Error(`unexpected path: ${path}`)
+  }
+
+  await assert.rejects(
+    () => publicApi.me(),
     (error) => error instanceof ApiError && error.status === 401,
   )
+  await nextMicrotask()
 
   assert.equal(localStorage.getItem('quizverse_access_token'), null)
   assert.equal(localStorage.getItem('quizverse_user'), null)
@@ -72,57 +341,22 @@ test('認証付きリクエストが401の場合は保存セッションを破�
   assert.equal(reloadCount, 0)
 })
 
-test('ログイン画面上で現在のセッションが401になった場合は再読み込みする', async () => {
+test('ログイン失敗の401ではrefreshやセッション失効リダイレクトを実行しない', async () => {
   globalThis.window.location.pathname = '/login'
-  saveSession({
-    access_token: 'expired-token',
-    user: { id: 1, display_name: 'Expired User' },
-  })
-  globalThis.fetch = async () => jsonResponse(401, {
-    error: { code: 'auth/invalid_token', message: 'Token expired' },
-  })
-
-  await assert.rejects(
-    () => publicApi.me('expired-token'),
-    (error) => error instanceof ApiError && error.status === 401,
-  )
-
-  assert.equal(localStorage.getItem('quizverse_access_token'), null)
-  assert.equal(assignedPath, null)
-  assert.equal(reloadCount, 1)
-})
-
-test('古いリクエストの401では後から保存された新しいセッションを破棄しない', async () => {
-  saveSession({
-    access_token: 'new-token',
-    user: { id: 2, display_name: 'New User' },
-  })
-  globalThis.fetch = async () => jsonResponse(401, {
-    error: { code: 'auth/invalid_token', message: 'Old token expired' },
-  })
-
-  await assert.rejects(
-    () => publicApi.me('old-token'),
-    (error) => error instanceof ApiError && error.status === 401,
-  )
-
-  assert.equal(localStorage.getItem('quizverse_access_token'), 'new-token')
-  assert.equal(JSON.parse(localStorage.getItem('quizverse_user')).display_name, 'New User')
-  assert.equal(assignedPath, null)
-  assert.equal(reloadCount, 0)
-})
-
-test('ログイン失敗の401ではセッション失効リダイレクトを実行しない', async () => {
-  globalThis.window.location.pathname = '/login'
-  globalThis.fetch = async () => jsonResponse(401, {
-    error: { code: 'auth/invalid_credentials', message: 'Invalid credentials' },
-  })
+  let requestCount = 0
+  globalThis.fetch = async () => {
+    requestCount += 1
+    return jsonResponse(401, {
+      error: { code: 'auth/invalid_credentials', message: 'Invalid credentials' },
+    })
+  }
 
   await assert.rejects(
     () => publicApi.login({ email: 'user@example.com', password: 'wrong' }),
     (error) => error instanceof ApiError && error.code === 'auth/invalid_credentials',
   )
 
+  assert.equal(requestCount, 1)
   assert.equal(assignedPath, null)
   assert.equal(reloadCount, 0)
 })
@@ -132,10 +366,9 @@ test('ログイン成功後はnextで指定した安全な画面へ復帰する'
   globalThis.window.location.search = '?next=%2Fquizzes%2Fnew'
 
   saveSession({
-    access_token: 'new-token',
     user: { id: 2, display_name: 'Creator' },
   })
-  await new Promise((resolve) => queueMicrotask(resolve))
+  await nextMicrotask()
 
   assert.equal(assignedPath, '/quizzes/new')
   assert.equal(sessionStorage.getItem('quizverse_auth_return_to'), null)

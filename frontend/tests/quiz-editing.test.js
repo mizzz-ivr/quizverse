@@ -34,6 +34,9 @@ beforeEach(() => {
   requests = []
   globalThis.localStorage = createStorage()
   globalThis.sessionStorage = createStorage()
+  globalThis.document = {
+    cookie: 'quizverse_session_hint=1; quizverse_csrf_access=editing-csrf',
+  }
   globalThis.window = {
     location: {
       origin: 'http://localhost:5173',
@@ -51,6 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete globalThis.fetch
+  delete globalThis.document
   delete globalThis.localStorage
   delete globalThis.sessionStorage
   delete globalThis.window
@@ -184,15 +188,17 @@ test('保存成功後にクイズ別の編集中データを削除できる', ()
   assert.equal(loadEditableQuizDraft('12', 'version', storage), null)
 })
 
-test('編集データ取得APIへJWT付きGETを送信する', async () => {
-  await publicApi.editableQuiz('12', 'access-token')
+test('編集データ取得APIへCookie付きGETを送信する', async () => {
+  await publicApi.editableQuiz('12', 'legacy-access-token')
 
   assert.equal(requests[0].path, '/api/me/quizzes/12')
   assert.equal(requests[0].options.method, 'GET')
-  assert.equal(requests[0].options.headers.Authorization, 'Bearer access-token')
+  assert.equal(requests[0].options.credentials, 'same-origin')
+  assert.equal(requests[0].options.headers.Authorization, undefined)
+  assert.equal(requests[0].options.headers['X-CSRF-TOKEN'], undefined)
 })
 
-test('下書き更新APIへJWT付きPUTを送信する', async () => {
+test('下書き更新APIへCookie・CSRF付きPUTを送信する', async () => {
   const values = {
     title: '更新',
     description: null,
@@ -200,10 +206,12 @@ test('下書き更新APIへJWT付きPUTを送信する', async () => {
     questions: [],
   }
 
-  await publicApi.updateQuiz('12', values, 'access-token')
+  await publicApi.updateQuiz('12', values, 'legacy-access-token')
 
   assert.equal(requests[0].path, '/api/me/quizzes/12')
   assert.equal(requests[0].options.method, 'PUT')
-  assert.equal(requests[0].options.headers.Authorization, 'Bearer access-token')
+  assert.equal(requests[0].options.credentials, 'same-origin')
+  assert.equal(requests[0].options.headers.Authorization, undefined)
+  assert.equal(requests[0].options.headers['X-CSRF-TOKEN'], 'editing-csrf')
   assert.deepEqual(JSON.parse(requests[0].options.body), values)
 })

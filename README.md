@@ -39,11 +39,18 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 - `DATABASE_URL`
 - `SECRET_KEY`
 - `JWT_SECRET_KEY`
+- `JWT_COOKIE_SECURE=true`
+- `AUTH_EXPOSE_TOKEN_IN_RESPONSE=false`
 - `AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false`
 - `OTP_INCLUDE_CODE_IN_RESPONSE=false`
 - `QUIZ_PUBLICATION_ENFORCED=true`
 
 ### 機能別環境変数
+- `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`
+- `JWT_REFRESH_TOKEN_EXPIRES_SECONDS`
+- `JWT_TOKEN_LOCATION`
+- `JWT_COOKIE_SAMESITE`
+- `JWT_COOKIE_DOMAIN`
 - `GOOGLE_OAUTH_CLIENT_ID`
 - `EMAIL_SETTINGS_ENCRYPTION_KEY`
 - `SERVICE_MAINTENANCE_MODE`
@@ -112,7 +119,7 @@ npm --prefix frontend install
 npm --prefix frontend run build
 ```
 
-## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024, ISSUE-0026, ISSUE-0028）
+## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024, ISSUE-0026, ISSUE-0028, ISSUE-0030）
 既存APIへ接続した一般向けMVP画面を実装しています。
 
 - `/`: ホーム・注目クイズ・ランキングプレビュー
@@ -126,7 +133,7 @@ npm --prefix frontend run build
 - `/rankings`: 現在公開中クイズを対象とした総合ランキング
 - `/quizzes/{quiz_id}/rankings`: 公開中クイズのクイズ別ランキング
 
-クイズ作成画面では、タイトル・説明・カテゴリ、1〜50問、各問題2〜6択、正答1件を入力し、JWT付きで `POST /api/quizzes` へ送信します。作成結果は `draft` となり、作成者は詳細画面でプレビューした後、マイクイズ画面から編集・公開できます。
+クイズ作成画面では、タイトル・説明・カテゴリ、1〜50問、各問題2〜6択、正答1件を入力し、HttpOnly Cookie認証とCSRFヘッダー付きで `POST /api/quizzes` へ送信します。作成結果は `draft` となり、作成者は詳細画面でプレビューした後、マイクイズ画面から編集・公開できます。
 
 ### クイズ公開ライフサイクル
 
@@ -138,15 +145,22 @@ npm --prefix frontend run build
 
 下書き編集は作成者本人かつプレイ履歴が存在しないクイズだけに限定しています。公開中・アーカイブ済みクイズは直接編集できません。また、一度でもプレイ履歴が保存されたクイズは、過去の採点結果と問題構造の整合性を守るため、下書きへ戻しても編集できません。
 
-MVPの認証情報は次のキーで `localStorage` に保存します。
+### ブラウザ認証セッション
 
-- `quizverse_access_token`
-- `quizverse_user`
+一般ユーザー向けWeb画面は、access tokenとrefresh tokenをHttpOnly Cookieで受け取ります。JWT本体はJavaScriptから参照せず、`localStorage`には画面表示用の`quizverse_user`だけを保存します。旧`quizverse_access_token`キーは起動・ログイン・ログアウト時に削除します。
 
-起動時に `GET /api/auth/me` でトークンを確認し、401応答時は保存済み認証情報を削除します。HttpOnly Cookie / refresh tokenへの移行は今後の課題です。
+- access token: 短命Cookie、通常の保護APIで利用
+- refresh token: `/api/auth/refresh`専用Cookie
+- CSRF: JavaScriptから読めるCSRF Cookieを状態変更リクエストの`X-CSRF-TOKEN`へ設定
+- API通信: `credentials: same-origin`
+- access token期限切れ: 同時401を1つのrefresh Promiseへ集約し、成功後に元のAPIを1回だけ再試行
+- refresh失敗: 表示キャッシュを削除し、復帰先付きログイン画面へ遷移
 
-## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007）
-- JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `AUTH_ENABLE_DEV_TOKEN_ENDPOINT`）。
+`quizverse_session_hint`はJWTを含まないセッション候補のヒントです。認証済みかどうかの最終確認は`GET /api/auth/me`で行います。CLI・既存APIクライアント向けのAuthorizationヘッダーJWT互換は残しますが、一般ユーザー向けWeb画面からは送信しません。
+
+## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030）
+- JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `JWT_REFRESH_TOKEN_EXPIRES_SECONDS`, `JWT_COOKIE_SECURE`）。
+- ブラウザはHttpOnly Cookie認証、状態変更APIはCSRF二重送信を利用します。
 - OTP設定は環境変数で管理します（例: `OTP_EXPIRES_SECONDS`, `OTP_MIN_RESEND_SECONDS`, `OTP_MAX_REQUESTS_PER_HOUR`, `OTP_MAX_VERIFY_ATTEMPTS`）。
 - Google OAuth ログインを利用する場合は `GOOGLE_OAUTH_CLIENT_ID` を設定してください。
 - メール設定暗号化キーは `EMAIL_SETTINGS_ENCRYPTION_KEY` で指定できます。未指定時は `SECRET_KEY` から導出した鍵を仮利用します。
@@ -168,17 +182,19 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
   - `PUT /api/admin/email-settings`: 管理向けメール設定保存（SMTPパスワードは更新時のみ受け取り）
   - `GET /api/status`: 一般公開向けサービスステータス（アプリ/API/DB/認証/メール/メンテナンス）
   - `GET /api/admin/status`: 管理向け詳細ステータス（仮置き管理判定: `X-Admin-Mode: true`）
-  - `POST /api/auth/register`: メールアドレス・パスワードで新規登録しJWTを発行
-  - `POST /api/auth/login`: メールアドレス・パスワードでJWTを発行
-  - `POST /api/auth/google`: Google ID token を検証し、OAuthログインでJWTを発行
+  - `POST /api/auth/register`: メールアドレス・パスワードで新規登録し、access / refresh Cookieを発行
+  - `POST /api/auth/login`: メールアドレス・パスワードを検証し、access / refresh Cookieを発行
+  - `POST /api/auth/google`: Google ID token を検証し、access / refresh Cookieを発行
+  - `POST /api/auth/refresh`: refresh CookieとCSRF値を検証し、新しいaccess Cookieを発行
+  - `POST /api/auth/logout`: access / refresh / CSRF Cookieを削除
   - `POST /api/auth/otp/request`: OTPコードを発行・保存し、メール送信基盤で送信（MVPではemailのみ対応）
   - `POST /api/auth/otp/verify`: destination / purpose に紐づくOTPコードを検証し、成功時に使用済み化
-  - `GET /api/auth/me`: JWTからログイン中ユーザーの基本情報を返却
+  - `GET /api/auth/me`: CookieまたはAuthorizationヘッダーJWTからログイン中ユーザーの基本情報を返却
 - 開発補助エンドポイント
   - `POST /api/auth/dev-token`: 開発/検証専用の仮トークン発行（`AUTH_ENABLE_DEV_TOKEN_ENDPOINT=true` の場合のみ）
 - 検証用保護ルート
   - `GET /api/auth/protected`: JWT必須の保護エンドポイント
-- `AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false` を本番で明示設定し、`dev-token` を無効化してください。
+- `AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false` と `AUTH_EXPOSE_TOKEN_IN_RESPONSE=false` を本番で明示設定してください。
 - `channel=phone` は将来拡張用のインターフェースのみで、MVPでは `auth/otp_channel_not_implemented` を返します。
 
 ## ドキュメント
@@ -203,6 +219,7 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
 - Issue: `docs/issues/ISSUE-0024.md`
 - Issue: `docs/issues/ISSUE-0026.md`
 - Issue: `docs/issues/ISSUE-0028.md`
+- Issue: `docs/issues/ISSUE-0030.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -223,6 +240,7 @@ MVPの認証情報は次のキーで `localStorage` に保存します。
 - Qiita下書き: `docs/qiita/ISSUE-0024_quiz_create_ui.md`
 - Qiita下書き: `docs/qiita/ISSUE-0026_quiz_publication_management.md`
 - Qiita下書き: `docs/qiita/ISSUE-0028_draft_quiz_editing.md`
+- Qiita下書き: `docs/qiita/ISSUE-0030_cookie_auth_session.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。
