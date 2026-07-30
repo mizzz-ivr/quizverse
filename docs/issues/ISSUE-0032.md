@@ -77,13 +77,15 @@ Web Locks APIが存在しない場合は、コールバックを直接実行す�
 
 ## テスト
 
-`frontend/tests/cross-tab-auth-lock.test.js`では、クエリ文字列付きdynamic importで`api.js`を複数回読み込み、別タブの独立したモジュール状態を再現する。
+`frontend/tests/cross-tab-auth-lock.test.js`と`frontend/tests/cross-tab-auth-lock-edge.test.js`では、クエリ文字列付きdynamic importで`api.js`を複数回読み込み、別タブの独立したモジュール状態を再現する。
 
 共有Web Locksモックを利用し、次を確認する。
 
 - 別タブのlogoutは進行中refreshの後に実行される
 - 別タブのloginは進行中refreshの後に実行される
 - registerも同じ認証Cookieロックを利用する
+- logout後に待機していたrefreshは送信されない
+- Web Locks API非対応環境でも同一タブsign-inはrefresh完了を待つ
 - すべて同じロック名と`exclusive`モードを利用する
 - logout完了後にローカル表示キャッシュが削除される
 
@@ -96,12 +98,12 @@ npm --prefix frontend run build
 
 ## CI確認結果
 
-- フロントエンドテスト: `47 passed, 0 failed`
-- バックエンドテスト: `88 passed, 4 warnings`（10.30秒）
+- フロントエンドテスト: `49 passed, 0 failed`
+- バックエンドテスト: `88 passed, 4 warnings`（9.79秒）
 - Production Build: 成功
   - JavaScript: 272.98 kB（gzip 75.47 kB）
   - CSS: 43.14 kB（gzip 7.31 kB）
-  - build: 1.52秒
+  - build: 1.29秒
 
 ## 対象外
 
@@ -119,3 +121,4 @@ npm --prefix frontend run build
 - ISSUE-0030
 - `frontend/src/public/api.js`
 - `frontend/tests/cross-tab-auth-lock.test.js`
+- `frontend/tests/cross-tab-auth-lock-edge.test.js`
