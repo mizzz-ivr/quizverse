@@ -23,21 +23,24 @@ QUIZ_STATUS_UPDATE_PATTERN = re.compile(r"^/api/me/quizzes/(?P<quiz_id>\d+)/stat
 QUIZ_PLAY_PATTERN = re.compile(r"^/api/quizzes/(?P<quiz_id>\d+)/play$")
 QUIZ_CREATE_PATH = "/api/quizzes"
 ID_ALLOCATION_ADVISORY_LOCK_KEY = 7249820371234
+QUIZ_ADVISORY_LOCK_BASE = 8_000_000_000_000_000
 
 
 def _editing_error(code: str, message: str, status_code: int):
     return jsonify({"error": {"code": code, "message": message}}), status_code
 
 
-def _lock_shared_id_allocation():
-    """Serialize MAX(id) + 1 allocation without locking an FK target.
+def _is_postgresql() -> bool:
+    return db.session.get_bind().dialect.name == "postgresql"
 
-    PostgreSQL uses a transaction-scoped advisory lock. SQLite and other test
-    dialects fall back to the first user row because they do not support the
-    PostgreSQL advisory-lock function.
-    """
-    bind = db.session.get_bind()
-    if bind.dialect.name == "postgresql":
+
+def _quiz_advisory_lock_key(quiz_id: int) -> int:
+    return QUIZ_ADVISORY_LOCK_BASE + quiz_id
+
+
+def _lock_shared_id_allocation():
+    """Serialize MAX(id) + 1 allocation without locking an FK target."""
+    if _is_postgresql():
         return db.session.execute(
             text("SELECT pg_advisory_xact_lock(:lock_key)"),
             {"lock_key": ID_ALLOCATION_ADVISORY_LOCK_KEY},
@@ -51,11 +54,29 @@ def _lock_shared_id_allocation():
     )
 
 
-def _lock_quiz(quiz_id: int):
+def _lock_quiz_shared(quiz_id: int):
+    """Allow concurrent reads/plays while conflicting with quiz mutations."""
+    if _is_postgresql():
+        return db.session.execute(
+            text("SELECT pg_advisory_xact_lock_shared(:lock_key)"),
+            {"lock_key": _quiz_advisory_lock_key(quiz_id)},
+        ).scalar()
+
     return Quiz.query.filter_by(id=quiz_id).with_for_update().first()
 
 
-def _lock_owned_quiz(quiz_id: int, user_id: int):
+def _lock_quiz_exclusive(quiz_id: int):
+    """Block shared readers/plays while a quiz mutation is in progress."""
+    if _is_postgresql():
+        return db.session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": _quiz_advisory_lock_key(quiz_id)},
+        ).scalar()
+
+    return Quiz.query.filter_by(id=quiz_id).with_for_update().first()
+
+
+def _lock_owned_quiz_row(quiz_id: int, user_id: int):
     return (
         Quiz.query.filter_by(id=quiz_id, author_user_id=user_id)
         .with_for_update()
@@ -65,10 +86,10 @@ def _lock_owned_quiz(quiz_id: int, user_id: int):
 
 @quiz_editing_bp.before_app_request
 def serialize_related_quiz_mutations():
-    """Apply transaction-scoped locks to related quiz mutations.
+    """Apply transaction-scoped locks to related quiz requests.
 
-    ID-allocating create/edit requests use a PostgreSQL advisory lock. Edit,
-    status, and play requests use the target quiz row lock where required.
+    PostgreSQL shared advisory locks let play submissions coexist. Edit and
+    status mutations use the matching exclusive advisory lock and a row lock.
     """
     if request.method == "POST" and request.path == QUIZ_CREATE_PATH:
         verify_jwt_in_request()
@@ -78,7 +99,7 @@ def serialize_related_quiz_mutations():
     play_match = QUIZ_PLAY_PATTERN.match(request.path)
     if request.method == "POST" and play_match:
         verify_jwt_in_request()
-        _lock_quiz(int(play_match.group("quiz_id")))
+        _lock_quiz_shared(int(play_match.group("quiz_id")))
         return None
 
     status_match = QUIZ_STATUS_UPDATE_PATTERN.match(request.path)
@@ -89,7 +110,12 @@ def serialize_related_quiz_mutations():
             user_id = int(identity)
         except (TypeError, ValueError):
             return None
-        _lock_owned_quiz(int(status_match.group("quiz_id")), user_id)
+
+        quiz_id = int(status_match.group("quiz_id"))
+        owned_quiz = Quiz.query.filter_by(id=quiz_id, author_user_id=user_id).first()
+        if owned_quiz:
+            _lock_quiz_exclusive(quiz_id)
+            _lock_owned_quiz_row(quiz_id, user_id)
 
     return None
 
@@ -176,6 +202,12 @@ def _serialize_editable_quiz(quiz: Quiz):
 @jwt_required()
 def get_editable_quiz(quiz_id: int):
     user_id = int(get_jwt_identity())
+
+    candidate, not_found = _owned_quiz_or_404(quiz_id, user_id)
+    if not_found:
+        return not_found
+
+    _lock_quiz_shared(candidate.id)
     quiz, not_found = _owned_quiz_or_404(quiz_id, user_id)
     if not_found:
         return not_found
@@ -192,8 +224,12 @@ def get_editable_quiz(quiz_id: int):
 def update_draft_quiz(quiz_id: int):
     user_id = int(get_jwt_identity())
 
-    # Serialize global manual ID allocation before locking the target quiz.
+    candidate, not_found = _owned_quiz_or_404(quiz_id, user_id)
+    if not_found:
+        return not_found
+
     _lock_shared_id_allocation()
+    _lock_quiz_exclusive(candidate.id)
     quiz, not_found = _owned_quiz_or_404(quiz_id, user_id, for_update=True)
     if not_found:
         return not_found
