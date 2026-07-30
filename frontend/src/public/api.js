@@ -144,6 +144,14 @@ export const publicApi = {
       accessToken,
       query: { status, page, per_page: perPage },
     }),
+  editableQuiz: (quizId, accessToken) =>
+    request(`/api/me/quizzes/${quizId}`, { accessToken }),
+  updateQuiz: (quizId, values, accessToken) =>
+    request(`/api/me/quizzes/${quizId}`, {
+      method: 'PUT',
+      accessToken,
+      body: values,
+    }),
   updateQuizStatus: (quizId, status, accessToken) =>
     request(`/api/me/quizzes/${quizId}/status`, {
       method: 'PATCH',
