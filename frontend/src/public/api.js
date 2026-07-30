@@ -95,13 +95,17 @@ function clearLocalSession() {
   sessionRevision += 1
 }
 
+function logoutCsrfToken() {
+  return readCookie(ACCESS_CSRF_COOKIE) ?? readCookie(REFRESH_CSRF_COOKIE)
+}
+
 export function clearSession({ notifyServer = true } = {}) {
   clearLocalSession()
 
   if (!notifyServer || typeof fetch !== 'function') return Promise.resolve(null)
 
   const headers = { Accept: 'application/json' }
-  const csrfToken = readCookie(ACCESS_CSRF_COOKIE)
+  const csrfToken = logoutCsrfToken()
   if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken
 
   return fetch('/api/auth/logout', {
@@ -141,8 +145,10 @@ function isUnsafeMethod(method) {
   return !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())
 }
 
-function csrfCookieFor(path) {
-  return path === '/api/auth/refresh' ? REFRESH_CSRF_COOKIE : ACCESS_CSRF_COOKIE
+function csrfTokenFor(path) {
+  if (path === '/api/auth/refresh') return readCookie(REFRESH_CSRF_COOKIE)
+  if (path === '/api/auth/logout') return logoutCsrfToken()
+  return readCookie(ACCESS_CSRF_COOKIE)
 }
 
 async function fetchJson(path, { method = 'GET', body, query } = {}) {
@@ -156,7 +162,7 @@ async function fetchJson(path, { method = 'GET', body, query } = {}) {
   const headers = { Accept: 'application/json' }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (isUnsafeMethod(method)) {
-    const csrfToken = readCookie(csrfCookieFor(path))
+    const csrfToken = csrfTokenFor(path)
     if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken
   }
 
