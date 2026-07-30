@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
@@ -144,6 +146,7 @@ def update_draft_quiz(quiz_id: int):
         quiz.title = validated["title"]
         quiz.description = validated["description"]
         quiz.category = validated["category"]
+        quiz.updated_at = datetime.now(timezone.utc)
 
         for question_payload in validated["questions"]:
             question = Question(
