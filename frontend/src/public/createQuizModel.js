@@ -188,3 +188,25 @@ export function buildCreateQuizPayload(draft) {
     })),
   }
 }
+
+export function buildQuizDraftFromEditableQuiz(quiz) {
+  if (!quiz || typeof quiz !== 'object' || !Array.isArray(quiz.questions) || quiz.questions.length === 0) {
+    return createInitialQuizDraft()
+  }
+
+  return {
+    title: typeof quiz.title === 'string' ? quiz.title : '',
+    description: typeof quiz.description === 'string' ? quiz.description : '',
+    category: typeof quiz.category === 'string' ? quiz.category : '',
+    questions: quiz.questions.slice(0, QUIZ_LIMITS.questions).map((question) => createQuestion({
+      body: question?.body,
+      explanation: question?.explanation,
+      choices: Array.isArray(question?.choices)
+        ? question.choices.slice(0, QUIZ_LIMITS.maxChoices).map((choice) => ({
+            body: choice?.body,
+            isCorrect: choice?.is_correct === true,
+          }))
+        : undefined,
+    })),
+  }
+}
