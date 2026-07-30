@@ -239,29 +239,27 @@ def test_published_and_archived_quizzes_are_not_directly_editable():
     assert archived_get.get_json()["error"]["code"] == "quiz/not_editable"
 
 
-def test_play_submission_acquires_shared_then_quiz_lock_before_scoring(monkeypatch):
+def test_play_submission_locks_quiz_without_allocation_mutex(monkeypatch):
     _app, client = _create_client()
     owner_token = _register(client, "lock-owner@example.com", "Lock Owner")
     player_token = _register(client, "lock-player@example.com", "Lock Player")
     quiz_id = _create_quiz(client, owner_token)
     assert _change_status(client, owner_token, quiz_id, "published").status_code == 200
 
-    lock_order = []
-    original_shared_lock = quiz_editing._lock_shared_id_allocation_row
+    locked_quiz_ids = []
     original_quiz_lock = quiz_editing._lock_quiz
 
-    def tracked_shared_lock():
-        lock_order.append("shared")
-        return original_shared_lock()
+    def unexpected_allocation_lock():
+        raise AssertionError("play submission must not acquire the allocation mutex")
 
     def tracked_quiz_lock(locked_quiz_id):
-        lock_order.append(f"quiz:{locked_quiz_id}")
+        locked_quiz_ids.append(locked_quiz_id)
         return original_quiz_lock(locked_quiz_id)
 
     monkeypatch.setattr(
         quiz_editing,
-        "_lock_shared_id_allocation_row",
-        tracked_shared_lock,
+        "_lock_shared_id_allocation",
+        unexpected_allocation_lock,
     )
     monkeypatch.setattr(quiz_editing, "_lock_quiz", tracked_quiz_lock)
 
@@ -281,4 +279,4 @@ def test_play_submission_acquires_shared_then_quiz_lock_before_scoring(monkeypat
     )
 
     assert response.status_code == 201
-    assert lock_order == ["shared", f"quiz:{quiz_id}"]
+    assert locked_quiz_ids == [int(quiz_id)]
