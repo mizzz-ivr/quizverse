@@ -94,6 +94,15 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
+## CI確認結果
+
+- フロントエンドテスト: `47 passed, 0 failed`
+- バックエンドテスト: `88 passed, 4 warnings`（10.30秒）
+- Production Build: 成功
+  - JavaScript: 272.98 kB（gzip 75.47 kB）
+  - CSS: 43.14 kB（gzip 7.31 kB）
+  - build: 1.52秒
+
 ## 対象外
 
 - Web Locks API非対応ブラウザ間での完全な複数タブ排他
