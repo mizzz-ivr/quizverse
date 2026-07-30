@@ -7,6 +7,11 @@ import { EditQuizApp } from './public/EditQuizApp'
 import { MyQuizzesApp } from './public/MyQuizzesApp'
 import { PublicQuizApp } from './public/PublicQuizApp'
 import { QuizDetailApp } from './public/QuizDetailApp'
+import { removeLegacyAuthToken } from './public/api'
+
+// Run the localStorage JWT cleanup for every entry path, including /status and
+// /admin, before selecting the React root.
+removeLegacyAuthToken()
 
 function PublicQuizRoot() {
   return (
