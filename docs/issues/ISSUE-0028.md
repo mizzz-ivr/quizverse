@@ -59,7 +59,7 @@ JWT必須。編集フォームへ復元するため、作成者本人の編集�
 
 ### `PUT /api/me/quizzes/{quiz_id}`
 
-JWT必須。作成APIと同じ入力契約を利用する。
+JWT必須。作成APIと同じ入力契約を利用する。リクエストJSONはオブジェクトでなければならず、配列・文字列・数値は `quiz/validation_error` の400を返す。
 
 ```json
 {
@@ -99,14 +99,21 @@ JWT必須。作成APIと同じ入力契約を利用する。
 - 例外発生時はロールバックし、既存内容を維持する
 - DBスキーマ変更は行わない
 
-### 状態変更との競合制御
+### 編集・状態変更・プレイ送信の競合制御
 
-編集PUTは対象クイズ行を `SELECT ... FOR UPDATE` してから、`draft` 判定・プレイ履歴判定・全置換を行う。
+次の3処理は、状態や問題を確認する前に同じ対象クイズ行を `SELECT ... FOR UPDATE` する。
 
-`PATCH /api/me/quizzes/{quiz_id}/status` もルート実行前に同じ本人所有クイズ行をロックする。これにより、編集と公開状態変更が同時に開始されても、両処理は同じ行ロック規約で直列化される。
+- `PUT /api/me/quizzes/{quiz_id}`
+- `PATCH /api/me/quizzes/{quiz_id}/status`
+- `POST /api/quizzes/{quiz_id}/play`
+
+ロックは各処理のcommitまたはrollbackまで保持する。
 
 - 状態変更が先に確定した場合: 編集PUTは非 `draft` として409
-- 編集が先に確定した場合: 編集完了後の内容を公開前検証して状態変更
+- 編集が先に確定した場合: 状態変更とプレイ送信は待機後に最新状態を確認
+- プレイ送信が先に確定した場合: 編集PUTは保存済みプレイ履歴を確認して409
+
+これにより、進行中プレイが参照している問題・選択肢IDを編集処理が削除する競合も防止する。
 
 ### 問題・選択肢IDの採番競合制御
 
@@ -130,7 +137,7 @@ MVPでは、最小IDのユーザー行を共有採番ロックとして利用し
 | 存在しない、または本人所有でない | 404 | `quiz/not_found` |
 | draft以外 | 409 | `quiz/not_editable` |
 | プレイ履歴あり | 409 | `quiz/edit_conflict` |
-| 入力不正 | 400 | `quiz/validation_error` |
+| JSONがオブジェクトでない、または入力不正 | 400 | `quiz/validation_error` |
 | 更新失敗 | 500 | `quiz/update_failed` |
 
 ## フロントエンド
@@ -174,7 +181,7 @@ quizverse_quiz_edit_draft:{quiz_id}
 - 公開状態とプレイ履歴を更新前に検証する
 - プレイ履歴がある問題・選択肢を削除しない
 - 全置換処理は単一トランザクションで実行する
-- 編集・状態変更は対象クイズの同じ行ロック規約を利用する
+- 編集・状態変更・プレイ送信は対象クイズの同じ行ロック規約を利用する
 - 作成・編集の手動ID採番は共有ロックで直列化する
 - 一時保存データはサーバー更新日時が一致する場合だけ復元する
 
@@ -192,7 +199,9 @@ cd backend && PYTHONPATH=. pytest
 - 他ユーザーのGET / PUTが404
 - draftの内容を全置換できる
 - 入力不正時に既存内容を維持する
+- 非オブジェクトJSONをJSON形式の400で拒否する
 - published / archivedを直接編集できない
+- プレイ送信前に対象クイズ行ロックを取得する
 - APIレスポンスを編集フォームへ復元できる
 - 編集フォームをPUT payloadへ正規化できる
 - JWT、HTTPメソッド、送信bodyが正しい
@@ -204,11 +213,11 @@ cd backend && PYTHONPATH=. pytest
 ## 確認結果
 
 - フロントエンドテスト: `34 passed, 0 failed`
-- バックエンドテスト: `65 passed, 1 warning`（7.39秒）
+- バックエンドテスト: `67 passed, 1 warning`（7.75秒）
 - フロントエンドProduction Build: 成功
   - JavaScript: 268.91 kB（gzip 74.05 kB）
   - CSS: 42.80 kB（gzip 7.25 kB）
-  - build: 1.52秒
+  - build: 1.10秒
 - 既存警告: `User.query.get()` に関するSQLAlchemy 2.x LegacyAPIWarning
 
 ## 対象外
