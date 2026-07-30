@@ -604,7 +604,7 @@ def me():
             401,
         )
 
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return _error_response(
             "auth/user_not_found",

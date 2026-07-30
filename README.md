@@ -100,6 +100,8 @@ flask --app app db upgrade
 cd backend && PYTHONPATH=. pytest
 ```
 
+`backend/pytest.ini`では`sqlalchemy.exc.LegacyAPIWarning`をエラーとして扱います。`Query.get()`などのSQLAlchemy Legacy APIが再導入された場合は、バックエンドCIが失敗します。
+
 フロントエンド回帰テスト:
 
 ```bash
@@ -160,7 +162,7 @@ npm --prefix frontend run build
 
 `quizverse_session_hint`はJWTを含まないセッション候補のヒントです。認証済みかどうかの最終確認は`GET /api/auth/me`で行います。CLI・既存APIクライアント向けのAuthorizationヘッダーJWT互換は残しますが、一般ユーザー向けWeb画面からは送信しません。
 
-## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030, ISSUE-0032）
+## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030, ISSUE-0032, ISSUE-0034）
 - JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `JWT_REFRESH_TOKEN_EXPIRES_SECONDS`, `JWT_COOKIE_SECURE`）。
 - ブラウザはHttpOnly Cookie認証、状態変更APIはCSRF二重送信を利用します。
 - OTP設定は環境変数で管理します（例: `OTP_EXPIRES_SECONDS`, `OTP_MIN_RESEND_SECONDS`, `OTP_MAX_REQUESTS_PER_HOUR`, `OTP_MAX_VERIFY_ATTEMPTS`）。
@@ -223,6 +225,7 @@ npm --prefix frontend run build
 - Issue: `docs/issues/ISSUE-0028.md`
 - Issue: `docs/issues/ISSUE-0030.md`
 - Issue: `docs/issues/ISSUE-0032.md`
+- Issue: `docs/issues/ISSUE-0034.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -245,6 +248,7 @@ npm --prefix frontend run build
 - Qiita下書き: `docs/qiita/ISSUE-0028_draft_quiz_editing.md`
 - Qiita下書き: `docs/qiita/ISSUE-0030_cookie_auth_session.md`
 - Qiita下書き: `docs/qiita/ISSUE-0032_cross_tab_auth_lock.md`
+- Qiita下書き: `docs/qiita/ISSUE-0034_sqlalchemy2_legacy_api_cleanup.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。
