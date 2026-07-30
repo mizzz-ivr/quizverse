@@ -6,7 +6,7 @@ import { CreateQuizApp } from './public/CreateQuizApp'
 import { EditQuizApp } from './public/EditQuizApp'
 import { MyQuizzesApp } from './public/MyQuizzesApp'
 import { PublicQuizApp } from './public/PublicQuizApp'
-import { QuizDetailApp } from './public/QuizDetailApp'
+import { QuizDetailSessionGate } from './public/QuizDetailSessionGate'
 import { removeLegacyAuthToken } from './public/api'
 
 // Run the localStorage JWT cleanup for every entry path, including /status and
@@ -43,7 +43,7 @@ if (pathname === '/status' || pathname.startsWith('/admin')) RootApp = App
 if (pathname === '/quizzes/new') RootApp = CreateQuizApp
 if (pathname === '/my/quizzes') RootApp = MyQuizzesApp
 if (/^\/my\/quizzes\/\d+\/edit$/.test(pathname)) RootApp = EditQuizApp
-if (/^\/quizzes\/\d+$/.test(pathname)) RootApp = QuizDetailApp
+if (/^\/quizzes\/\d+$/.test(pathname)) RootApp = QuizDetailSessionGate
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
