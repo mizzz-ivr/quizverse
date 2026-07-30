@@ -128,19 +128,48 @@ localStorage.removeItem('quizverse_access_token')
 
 ユーザー名などの表示キャッシュは残せますが、認証判定の根拠にはしません。最終的なログイン状態は`GET /api/auth/me`で確認します。
 
-## logout
+## logoutもCSRF保護する
 
-logoutはCookie削除レスポンスを返します。
+access tokenが期限切れでもCookieを消せるよう、logout自体は有効なJWTを必須にしていません。ただし、ログイン中ユーザーを外部サイトから強制ログアウトさせるCSRFは防ぐ必要があります。
+
+そこで`quizverse_session_hint=1`が存在する場合は、access用またはrefresh用CSRF Cookieの値を`X-CSRF-TOKEN`へ設定する契約にしました。
+
+```python
+import hmac
+
+
+def logout_csrf_is_valid():
+    if request.cookies.get('quizverse_session_hint') != '1':
+        return True
+
+    provided = request.headers.get('X-CSRF-TOKEN')
+    expected_values = [
+        request.cookies.get('quizverse_csrf_access'),
+        request.cookies.get('quizverse_csrf_refresh'),
+    ]
+    return provided is not None and any(
+        expected and hmac.compare_digest(provided, expected)
+        for expected in expected_values
+    )
+```
 
 ```python
 @auth_session_bp.post('/logout')
 def logout_session():
+    if not logout_csrf_is_valid():
+        return jsonify({
+            'error': {
+                'code': 'auth/csrf_failed',
+                'message': 'CSRF token is missing or invalid.',
+            }
+        }), 401
+
     response = jsonify({'status': 'logged_out'})
     unset_jwt_cookies(response)
     return response
 ```
 
-access tokenが期限切れでもCookieを消せるよう、logout自体はJWT必須にしていません。
+フロントエンドはaccess用CSRFを優先し、access Cookieが消えている場合はrefresh用CSRFへフォールバックします。セッションヒントがないlogoutは冪等なCookie削除として成功させます。
 
 ## テストした内容
 
@@ -152,6 +181,9 @@ access tokenが期限切れでもCookieを消せるよう、logout自体はJWT�
 - Cookieだけで`/auth/me`へアクセス可能
 - CSRFなしPOSTを拒否
 - refreshで新しいaccess Cookieを発行
+- セッション中のlogoutはCSRFなしを拒否
+- access Cookie消失後はrefresh用CSRFでlogout可能
+- セッションなしlogoutは冪等成功
 - logout後に保護APIが401
 
 フロントエンドでは次を確認しました。
@@ -161,12 +193,9 @@ access tokenが期限切れでもCookieを消せるよう、logout自体はJWT�
 - Authorizationヘッダーを送信しない
 - 同時401でもrefreshは1回
 - refresh失敗時に復帰先付きログインへ遷移
+- logout時はaccessまたはrefresh用CSRFを送信
 
-最終CIは次の結果でした。
-
-- フロントエンド: 36件成功
-- バックエンド: 76件成功
-- Production Build: 成功
+最終CIの実測値はPRマージ前に更新します。
 
 ## 今後
 
