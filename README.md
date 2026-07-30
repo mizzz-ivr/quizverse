@@ -119,7 +119,7 @@ npm --prefix frontend install
 npm --prefix frontend run build
 ```
 
-## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024, ISSUE-0026, ISSUE-0028, ISSUE-0030）
+## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024, ISSUE-0026, ISSUE-0028, ISSUE-0030, ISSUE-0032）
 既存APIへ接続した一般向けMVP画面を実装しています。
 
 - `/`: ホーム・注目クイズ・ランキングプレビュー
@@ -154,11 +154,13 @@ npm --prefix frontend run build
 - CSRF: JavaScriptから読めるCSRF Cookieを状態変更リクエストの`X-CSRF-TOKEN`へ設定
 - API通信: `credentials: same-origin`
 - access token期限切れ: 同時401を1つのrefresh Promiseへ集約し、成功後に元のAPIを1回だけ再試行
+- 複数タブ排他: refresh・logout・login・register・Google loginをWeb Locks APIの共通`exclusive`ロックで直列化
+- Web Locks API非対応環境: 既存の同一タブPromise制御へフォールバック
 - refresh失敗: 表示キャッシュを削除し、復帰先付きログイン画面へ遷移
 
 `quizverse_session_hint`はJWTを含まないセッション候補のヒントです。認証済みかどうかの最終確認は`GET /api/auth/me`で行います。CLI・既存APIクライアント向けのAuthorizationヘッダーJWT互換は残しますが、一般ユーザー向けWeb画面からは送信しません。
 
-## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030）
+## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030, ISSUE-0032）
 - JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `JWT_REFRESH_TOKEN_EXPIRES_SECONDS`, `JWT_COOKIE_SECURE`）。
 - ブラウザはHttpOnly Cookie認証、状態変更APIはCSRF二重送信を利用します。
 - OTP設定は環境変数で管理します（例: `OTP_EXPIRES_SECONDS`, `OTP_MIN_RESEND_SECONDS`, `OTP_MAX_REQUESTS_PER_HOUR`, `OTP_MAX_VERIFY_ATTEMPTS`）。
@@ -220,6 +222,7 @@ npm --prefix frontend run build
 - Issue: `docs/issues/ISSUE-0026.md`
 - Issue: `docs/issues/ISSUE-0028.md`
 - Issue: `docs/issues/ISSUE-0030.md`
+- Issue: `docs/issues/ISSUE-0032.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -241,6 +244,7 @@ npm --prefix frontend run build
 - Qiita下書き: `docs/qiita/ISSUE-0026_quiz_publication_management.md`
 - Qiita下書き: `docs/qiita/ISSUE-0028_draft_quiz_editing.md`
 - Qiita下書き: `docs/qiita/ISSUE-0030_cookie_auth_session.md`
+- Qiita下書き: `docs/qiita/ISSUE-0032_cross_tab_auth_lock.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。

@@ -10,6 +10,7 @@ const SESSION_HINT_COOKIE = 'quizverse_session_hint'
 const ACCESS_CSRF_COOKIE = 'quizverse_csrf_access'
 const REFRESH_CSRF_COOKIE = 'quizverse_csrf_refresh'
 const COOKIE_SESSION_MARKER = 'cookie-session'
+const AUTH_COOKIE_LOCK_NAME = 'quizverse-auth-cookie-mutation'
 
 let sessionRevision = 0
 let refreshPromise = null
@@ -41,6 +42,20 @@ function hasSessionHint() {
 
 function storageAvailable() {
   return typeof localStorage !== 'undefined'
+}
+
+function webLocksAvailable() {
+  return typeof navigator !== 'undefined'
+    && typeof navigator.locks?.request === 'function'
+}
+
+async function withAuthCookieLock(callback) {
+  if (!webLocksAvailable()) return callback()
+  return navigator.locks.request(
+    AUTH_COOKIE_LOCK_NAME,
+    { mode: 'exclusive' },
+    callback,
+  )
 }
 
 export function removeLegacyAuthToken() {
@@ -157,16 +172,20 @@ async function fetchJson(path, { method = 'GET', body, query } = {}) {
   return { response, payload }
 }
 
+function apiErrorFrom(response, payload, fallbackMessage) {
+  return new ApiError(
+    payload?.error?.message ?? fallbackMessage,
+    response.status,
+    payload?.error?.code ?? '',
+  )
+}
+
 async function performServerLogout() {
   const { response, payload } = await fetchJson('/api/auth/logout', {
     method: 'POST',
   })
   if (!response.ok) {
-    throw new ApiError(
-      payload?.error?.message ?? 'ログアウトできませんでした。',
-      response.status,
-      payload?.error?.code ?? '',
-    )
+    throw apiErrorFrom(response, payload, 'ログアウトできませんでした。')
   }
   return payload
 }
@@ -174,10 +193,11 @@ async function performServerLogout() {
 export function clearSession({ notifyServer = true, requireServerSuccess = true } = {}) {
   if (logoutPromise) return logoutPromise
 
-  logoutPromise = (async () => {
-    // A refresh response can reinstall cookies. Wait for it first so the
-    // subsequent logout response is always the final cookie mutation.
-    if (refreshPromise) {
+  const useWebLock = webLocksAvailable()
+  logoutPromise = withAuthCookieLock(async () => {
+    // Web Locks serializes refresh/logout across every same-origin tab. When the
+    // API is unavailable, retain the existing same-tab Promise fallback.
+    if (!useWebLock && refreshPromise) {
       try {
         await refreshPromise
       } catch {
@@ -195,7 +215,7 @@ export function clearSession({ notifyServer = true, requireServerSuccess = true 
 
     clearLocalSession()
     return null
-  })().finally(() => {
+  }).finally(() => {
     logoutPromise = null
   })
 
@@ -203,8 +223,7 @@ export function clearSession({ notifyServer = true, requireServerSuccess = true 
 }
 
 function invalidateSessionAfterAuthFailure() {
-  clearLocalSession()
-  if (typeof fetch === 'function') void performServerLogout().catch(() => null)
+  void clearSession({ requireServerSuccess: false }).catch(() => null)
 }
 
 function redirectToLogin(requestRevision) {
@@ -234,16 +253,22 @@ async function refreshAccessToken(expectedRevision) {
 
   if (!refreshPromise) {
     const refreshRevision = sessionRevision
-    refreshPromise = (async () => {
+    refreshPromise = withAuthCookieLock(async () => {
+      // Another tab may have logged out while this refresh was waiting for the
+      // shared lock. Re-check browser state only after ownership is granted.
+      if (logoutPromise) {
+        throw new ApiError('Logout is in progress.', 401, 'auth/logout_in_progress')
+      }
+      if (expectedRevision !== sessionRevision) return null
+      if (!hasSessionHint()) {
+        throw new ApiError('Refresh session is unavailable.', 401, 'auth/missing_refresh_token')
+      }
+
       const { response, payload } = await fetchJson('/api/auth/refresh', {
         method: 'POST',
       })
       if (!response.ok) {
-        throw new ApiError(
-          payload?.error?.message ?? 'ログイン状態を更新できませんでした。',
-          response.status,
-          payload?.error?.code ?? '',
-        )
+        throw apiErrorFrom(response, payload, 'ログイン状態を更新できませんでした。')
       }
       if (
         payload?.user
@@ -253,12 +278,43 @@ async function refreshAccessToken(expectedRevision) {
         saveSession(payload, { redirect: false })
       }
       return payload
-    })().finally(() => {
+    }).finally(() => {
       refreshPromise = null
     })
   }
 
   return refreshPromise
+}
+
+async function signInRequest(path, values) {
+  const useWebLock = webLocksAvailable()
+  return withAuthCookieLock(async () => {
+    // On browsers without Web Locks, preserve same-tab ordering against any
+    // refresh/logout already in flight.
+    if (!useWebLock && refreshPromise) {
+      try {
+        await refreshPromise
+      } catch {
+        // A fresh sign-in remains valid even when the previous refresh failed.
+      }
+    }
+    if (!useWebLock && logoutPromise) {
+      try {
+        await logoutPromise
+      } catch {
+        // Allow the explicit sign-in request to surface its own result.
+      }
+    }
+
+    const { response, payload } = await fetchJson(path, {
+      method: 'POST',
+      body: values,
+    })
+    if (!response.ok) {
+      throw apiErrorFrom(response, payload, '認証リクエストの処理に失敗しました。')
+    }
+    return payload
+  })
 }
 
 async function request(
@@ -323,14 +379,9 @@ async function request(
 }
 
 export const publicApi = {
-  register: (values) => request('/api/auth/register', {
-    method: 'POST',
-    body: values,
-  }),
-  login: (values) => request('/api/auth/login', {
-    method: 'POST',
-    body: values,
-  }),
+  register: (values) => signInRequest('/api/auth/register', values),
+  login: (values) => signInRequest('/api/auth/login', values),
+  googleLogin: (values) => signInRequest('/api/auth/google', values),
   logout: () => clearSession(),
   me: (_legacyAccessToken) => request('/api/auth/me', { auth: 'required' }),
   createQuiz: (values, _legacyAccessToken) => request('/api/quizzes', {
