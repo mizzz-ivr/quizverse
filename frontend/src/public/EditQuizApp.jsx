@@ -56,22 +56,42 @@ function LoadingState() {
   return <main className="mx-auto max-w-6xl space-y-5 px-4 py-12"><div className="h-56 animate-pulse rounded-[2rem] bg-slate-100 dark:bg-slate-900" />{[...Array(3)].map((_, index) => <div key={index} className="h-72 animate-pulse rounded-[2rem] bg-slate-100 dark:bg-slate-900" />)}</main>
 }
 
+function LoadErrorState({ message, onRetry }) {
+  return (
+    <main className="mx-auto grid min-h-screen max-w-4xl place-items-center px-4 py-12">
+      <section className="w-full rounded-[2rem] border border-rose-200 bg-white p-8 text-center shadow-xl dark:border-rose-500/30 dark:bg-slate-900 md:p-12">
+        <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-200"><Icon name="spark" className="h-8 w-8" /></span>
+        <h1 className="mt-6 text-3xl font-semibold">編集データを読み込めません</h1>
+        <p className="mx-auto mt-4 max-w-xl leading-7 text-slate-600 dark:text-slate-300">{message || '通信環境を確認して再試行してください。'}</p>
+        <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+          <button type="button" onClick={onRetry} className="rounded-2xl bg-slate-950 px-6 py-3 font-medium text-white dark:bg-white dark:text-slate-950">もう一度読み込む</button>
+          <a href="/my/quizzes" className="rounded-2xl border border-slate-300 px-6 py-3 font-medium dark:border-slate-700">マイクイズへ戻る</a>
+        </div>
+      </section>
+    </main>
+  )
+}
+
 export function EditQuizApp() {
   const quizId = useMemo(() => window.location.pathname.match(/^\/my\/quizzes\/(\d+)\/edit$/)?.[1] ?? '', [])
   const returnTo = `/my/quizzes/${quizId}/edit`
   const [session] = useState(() => getStoredSession())
   const [draft, setDraft] = useState(() => createInitialQuizDraft())
   const [loading, setLoading] = useState(Boolean(session?.accessToken))
+  const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const [loadVersion, setLoadVersion] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [attempted, setAttempted] = useState(false)
-  const [error, setError] = useState('')
+  const [submitError, setSubmitError] = useState('')
   const validation = useMemo(() => validateQuizDraft(draft), [draft])
 
   useEffect(() => {
     if (!session?.accessToken || !quizId) return undefined
     let active = true
     setLoading(true)
-    setError('')
+    setLoaded(false)
+    setLoadError('')
 
     Promise.all([
       publicApi.me(session.accessToken),
@@ -80,12 +100,17 @@ export function EditQuizApp() {
       .then(([, payload]) => {
         if (!active) return
         setDraft(buildQuizDraftFromEditableQuiz(payload.quiz))
+        setLoaded(true)
       })
-      .catch((requestError) => active && setError(friendlyError(requestError)))
+      .catch((requestError) => {
+        if (!active) return
+        setLoadError(friendlyError(requestError))
+        setLoaded(false)
+      })
       .finally(() => active && setLoading(false))
 
     return () => { active = false }
-  }, [quizId, session?.accessToken])
+  }, [quizId, session?.accessToken, loadVersion])
 
   const updateQuestion = (questionIndex, patch) => {
     setDraft((current) => ({
@@ -139,9 +164,9 @@ export function EditQuizApp() {
   const submit = async (event) => {
     event.preventDefault()
     setAttempted(true)
-    setError('')
+    setSubmitError('')
     if (!validation.valid) {
-      setError('未入力または修正が必要な項目があります。')
+      setSubmitError('未入力または修正が必要な項目があります。')
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
@@ -151,7 +176,7 @@ export function EditQuizApp() {
       await publicApi.updateQuiz(quizId, buildCreateQuizPayload(draft), session.accessToken)
       window.location.assign(`/quizzes/${quizId}`)
     } catch (requestError) {
-      setError(friendlyError(requestError))
+      setSubmitError(friendlyError(requestError))
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setSubmitting(false)
@@ -160,6 +185,7 @@ export function EditQuizApp() {
 
   if (!session?.accessToken) return <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-100"><LoginRequired returnTo={returnTo} /></div>
   if (loading) return <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-100"><LoadingState /></div>
+  if (!loaded) return <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-100"><LoadErrorState message={loadError} onRetry={() => setLoadVersion((current) => current + 1)} /></div>
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-100">
@@ -177,7 +203,7 @@ export function EditQuizApp() {
           <p className="mt-4 max-w-3xl leading-7 text-slate-300">タイトル、問題、選択肢、正答を更新できます。保存後は作成者プレビューへ移動します。</p>
         </section>
 
-        {error ? <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200" role="alert">{error}</div> : null}
+        {submitError ? <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200" role="alert">{submitError}</div> : null}
 
         <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-7">
           <h2 className="text-2xl font-semibold">基本情報</h2>
@@ -205,7 +231,7 @@ export function EditQuizApp() {
 
         <button type="button" disabled={draft.questions.length >= QUIZ_LIMITS.questions} onClick={addQuestion} className="flex w-full items-center justify-center gap-2 rounded-[2rem] border-2 border-dashed border-cyan-300 bg-cyan-50/50 px-6 py-5 font-medium text-cyan-800 disabled:opacity-40 dark:border-cyan-500/40 dark:bg-cyan-500/5 dark:text-cyan-200"><Icon name="plus" />問題を追加する</button>
 
-        <section className="sticky bottom-4 z-30 flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-2xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-slate-500">{validation.valid ? '保存できます。' : '未入力または修正が必要な項目があります。'}</p><div className="flex gap-3"><a href="/my/quizzes" className="rounded-2xl border border-slate-300 px-5 py-3 text-sm dark:border-slate-700">キャンセル</a><button type="submit" disabled={submitting || Boolean(error && !draft.title)} className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-6 py-3 font-semibold text-white disabled:opacity-50">{submitting ? '保存中...' : '変更を保存'}<Icon name="save" /></button></div></section>
+        <section className="sticky bottom-4 z-30 flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-2xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-slate-500">{validation.valid ? '保存できます。' : '未入力または修正が必要な項目があります。'}</p><div className="flex gap-3"><a href="/my/quizzes" className="rounded-2xl border border-slate-300 px-5 py-3 text-sm dark:border-slate-700">キャンセル</a><button type="submit" disabled={submitting} className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-6 py-3 font-semibold text-white disabled:opacity-50">{submitting ? '保存中...' : '変更を保存'}<Icon name="save" /></button></div></section>
       </form>
     </div>
   )
