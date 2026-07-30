@@ -3,6 +3,7 @@ from flask import Flask
 from .api.admin import admin_bp
 from .api.auth import auth_bp
 from .api.auth_session import auth_session_bp
+from .api import auth_origin_guard  # noqa: F401
 from .api.health import health_bp
 from .api.quiz_editing import quiz_editing_bp
 from .api.quiz_management import quiz_management_bp
