@@ -12,7 +12,7 @@ QuizVerseでは、作成したクイズを `draft` として保存し、作成�
 - `draft` だけを編集できる
 - プレイ履歴が1件でもあれば編集できない
 - 問題・選択肢はトランザクション内で全置換する
-- 編集と公開状態変更を同じ行ロック規約で直列化する
+- 編集・公開状態変更・プレイ送信を同じクイズ行ロックで直列化する
 - 手動ID採番を共有ロックで直列化する
 - 編集データ取得に失敗した画面では空フォームを保存させない
 - JWT期限切れ後も同じタブ内の未保存編集を復元する
@@ -28,19 +28,45 @@ PUT /api/me/quizzes/{quiz_id}
 
 一般公開のクイズ詳細APIは正答を返しません。一方、編集フォームには現在の正答設定が必要なので、本人向けGETだけが `is_correct` を返します。
 
-## 所有者を404で判定する
+## 所有者を404で判定し、更新時だけ行ロックする
 
-本人所有ではないクイズには403ではなく404を返します。
+本人所有ではないクイズには403ではなく404を返します。GETでは通常取得し、PUTでは編集可能性を確認する前に行ロックを取得します。
 
 ```python
-def _owned_quiz_or_404(quiz_id: int, user_id: int):
-    quiz = Quiz.query.filter_by(id=quiz_id, author_user_id=user_id).first()
+def _owned_quiz_or_404(
+    quiz_id: int,
+    user_id: int,
+    *,
+    for_update: bool = False,
+):
+    query = Quiz.query.filter_by(
+        id=quiz_id,
+        author_user_id=user_id,
+    )
+    if for_update:
+        query = query.with_for_update()
+
+    quiz = query.first()
     if not quiz:
-        return None, _editing_error("quiz/not_found", "Quiz not found.", 404)
+        return None, _editing_error(
+            "quiz/not_found",
+            "Quiz not found.",
+            404,
+        )
     return quiz, None
 ```
 
-これにより、他ユーザーがIDを変えながら存在を確認することを防ぎます。
+PUTでは次のように `for_update=True` を指定します。
+
+```python
+quiz, not_found = _owned_quiz_or_404(
+    quiz_id,
+    user_id,
+    for_update=True,
+)
+```
+
+これにより、他ユーザーがIDを変えながら存在を確認することを防ぎつつ、編集可能性の確認からcommitまで対象クイズ行をロックできます。
 
 ## 編集可能条件を共通化する
 
@@ -49,7 +75,11 @@ GETとPUTの両方で同じ条件を使います。
 ```python
 def _ensure_editable(quiz: Quiz):
     if quiz.status != QuizStatus.draft:
-        return _editing_error("quiz/not_editable", "Only draft quizzes can be edited.", 409)
+        return _editing_error(
+            "quiz/not_editable",
+            "Only draft quizzes can be edited.",
+            409,
+        )
 
     play_exists = db.session.query(QuizPlay.id).filter(
         QuizPlay.quiz_id == quiz.id
@@ -69,16 +99,25 @@ def _ensure_editable(quiz: Quiz):
 
 作成と編集で入力仕様がずれると、作成できるのに編集できない、またはその逆が発生します。
 
-今回は既存の `_validate_create_quiz_payload` をPUTでも利用しました。
+今回は既存の `_validate_create_quiz_payload` をPUTでも利用しました。共有バリデーターへ渡す前に、JSONがオブジェクトであることも確認します。
 
 ```python
-payload = request.get_json(silent=True) or {}
+payload = request.get_json(silent=True)
+if payload is None:
+    payload = {}
+elif not isinstance(payload, dict):
+    return _editing_error(
+        "quiz/validation_error",
+        "Request body must be a JSON object.",
+        400,
+    )
+
 validated, validation_error = _validate_create_quiz_payload(payload)
 if validation_error:
     return validation_error
 ```
 
-タイトル、問題数、選択肢数、正答数などの制約を一元化できます。
+タイトル、問題数、選択肢数、正答数などの制約を一元化し、配列・文字列・数値のJSONもHTML 500ではなくJSON 400で返せます。
 
 ## 問題・選択肢をトランザクションで全置換する
 
@@ -86,12 +125,12 @@ MVPでは問題単位の差分更新ではなく、全置換を採用しまし�
 
 ```python
 try:
-    Choice.query.filter(Choice.question_id.in_(existing_question_ids)).delete(
-        synchronize_session=False
-    )
-    Question.query.filter(Question.id.in_(existing_question_ids)).delete(
-        synchronize_session=False
-    )
+    Choice.query.filter(
+        Choice.question_id.in_(existing_question_ids)
+    ).delete(synchronize_session=False)
+    Question.query.filter(
+        Question.id.in_(existing_question_ids)
+    ).delete(synchronize_session=False)
 
     quiz.title = validated["title"]
     quiz.description = validated["description"]
@@ -108,22 +147,28 @@ except Exception:
 
 全置換は実装が明快ですが、問題IDが変わります。そのため、プレイ履歴があるクイズでは利用できません。履歴付き編集を実現するなら、問題バージョンやクイズリビジョンを導入する必要があります。
 
-## 編集と公開を同じ行ロックで直列化する
+## 編集・公開・プレイを同じ行ロックで直列化する
 
-編集PUTだけがクイズ行をロックしても、公開状態PATCHがロックせずに古い `draft` を読めば競合を防げません。
+編集PUTだけがクイズ行をロックしても、公開状態PATCHやプレイ送信POSTがロックせずに古い状態を読めば競合を防げません。
 
-そこで両方の処理が、状態確認より前に同じ対象クイズ行へ `SELECT ... FOR UPDATE` を行うようにしました。
+そこで次の3処理が、状態や問題を確認する前に同じ対象クイズ行へ `SELECT ... FOR UPDATE` を行うようにしました。
 
 ```text
-編集PUT                      状態変更PATCH
-   │                               │
-   ├─ 対象Quiz行をFOR UPDATE       ├─ 対象Quiz行をFOR UPDATE
-   ├─ draft / play履歴確認          ├─ 現在状態 / 公開条件確認
-   ├─ 全置換                       ├─ 状態更新
-   └─ commit                       └─ commit
+編集PUT                  状態変更PATCH              プレイ送信POST
+   │                          │                          │
+   ├─ Quiz行をFOR UPDATE      ├─ Quiz行をFOR UPDATE      ├─ Quiz行をFOR UPDATE
+   ├─ draft / 履歴確認         ├─ 状態 / 公開条件確認      ├─ 公開状態・問題確認
+   ├─ 全置換                  ├─ 状態更新                ├─ 採点・履歴保存
+   └─ commit                  └─ commit                  └─ commit
 ```
 
-どちらか一方がロックを取得すると、もう一方はcommitまで待機します。待機後は確定済みの最新状態を前提に検証するため、編集中に古い問題構造を公開する競合を防げます。
+どれか1つがロックを取得すると、ほかの処理はcommitまで待機します。
+
+- 進行中のプレイが先なら、履歴保存後に編集が再確認して409
+- 編集が先なら、プレイは編集完了後の公開状態を再確認
+- 状態変更と編集も、確定済みの最新状態を前提に検証
+
+これにより、プレイヤーが回答送信中の問題IDを編集処理が削除する競合も防げます。
 
 ## `MAX(id) + 1` 採番も共有ロックで直列化する
 
@@ -215,7 +260,9 @@ saveEditableQuizDraft(quizId, serverUpdatedAt, draft)
 - 他ユーザーのGET / PUTは404
 - draftを全置換できる
 - 入力不正時に既存内容が残る
+- 非オブジェクトJSONはJSON形式の400
 - published / archivedは409
+- プレイ送信前に対象クイズ行ロックを取得する
 
 フロントエンドでは次を確認しました。
 
@@ -226,16 +273,8 @@ saveEditableQuizDraft(quizId, serverUpdatedAt, draft)
 - 更新日時が変わった古い一時保存を破棄する
 - PUT成功後に一時保存を削除する
 
-最終結果は次の通りです。
-
-```text
-frontend: 34 passed, 0 failed
-backend : 65 passed, 1 warning
-build   : success
-```
-
 ## まとめ
 
-編集機能では「更新できること」だけでなく、「過去の結果を壊さないこと」と「競合時に古い状態を公開しないこと」が重要です。
+編集機能では「更新できること」だけでなく、「過去の結果を壊さないこと」と「競合時に古い状態を公開・採点しないこと」が重要です。
 
 MVPでは、draft限定・プレイ履歴なし・全置換・共通ロック・再認証用一時保存という制約によって、実装の単純さと履歴の整合性を両立しました。将来、公開後の編集が必要になった時点で、クイズの版管理とDB sequence / identityへ拡張できる構成です。
