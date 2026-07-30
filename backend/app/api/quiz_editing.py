@@ -18,8 +18,11 @@ def _editing_error(code: str, message: str, status_code: int):
     return jsonify({"error": {"code": code, "message": message}}), status_code
 
 
-def _owned_quiz_or_404(quiz_id: int, user_id: int):
-    quiz = Quiz.query.filter_by(id=quiz_id, author_user_id=user_id).first()
+def _owned_quiz_or_404(quiz_id: int, user_id: int, *, for_update: bool = False):
+    query = Quiz.query.filter_by(id=quiz_id, author_user_id=user_id)
+    if for_update:
+        query = query.with_for_update()
+    quiz = query.first()
     if not quiz:
         return None, _editing_error("quiz/not_found", "Quiz not found.", 404)
     return quiz, None
@@ -112,7 +115,7 @@ def get_editable_quiz(quiz_id: int):
 @jwt_required()
 def update_draft_quiz(quiz_id: int):
     user_id = int(get_jwt_identity())
-    quiz, not_found = _owned_quiz_or_404(quiz_id, user_id)
+    quiz, not_found = _owned_quiz_or_404(quiz_id, user_id, for_update=True)
     if not_found:
         return not_found
 
