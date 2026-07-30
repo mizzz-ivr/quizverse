@@ -22,9 +22,9 @@ class Config:
         seconds=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES_SECONDS", "2592000"))
     )
 
-    # Browsers use HttpOnly cookies. Header JWT remains available for CLI and
-    # existing API clients while the frontend migration is rolled out.
-    JWT_TOKEN_LOCATION = _env_list("JWT_TOKEN_LOCATION", "cookies,headers")
+    # Header JWT is checked first so API clients that intentionally send a
+    # bearer token are not shadowed by cookies retained from a prior login.
+    JWT_TOKEN_LOCATION = _env_list("JWT_TOKEN_LOCATION", "headers,cookies")
     JWT_COOKIE_SECURE = _env_bool("JWT_COOKIE_SECURE", "false")
     JWT_COOKIE_SAMESITE = os.getenv("JWT_COOKIE_SAMESITE", "Lax")
     JWT_COOKIE_DOMAIN = os.getenv("JWT_COOKIE_DOMAIN") or None
@@ -42,6 +42,7 @@ class Config:
     JWT_ACCESS_CSRF_COOKIE_PATH = "/"
     JWT_REFRESH_CSRF_COOKIE_PATH = "/"
 
+    AUTH_TRUSTED_ORIGINS = _env_list("AUTH_TRUSTED_ORIGINS", "")
     AUTH_EXPOSE_TOKEN_IN_RESPONSE = _env_bool(
         "AUTH_EXPOSE_TOKEN_IN_RESPONSE", "false"
     )
