@@ -195,7 +195,14 @@ def logout_session():
 - refresh失敗時に復帰先付きログインへ遷移
 - logout時はaccessまたはrefresh用CSRFを送信
 
-最終CIの実測値はPRマージ前に更新します。
+最終CIは次の結果でした。
+
+- フロントエンド: 37件成功
+- バックエンド: 79件成功（既存警告を含む3 warnings）
+- Production Build: 成功
+  - JavaScript: 270.89 kB（gzip 74.81 kB）
+  - CSS: 42.80 kB（gzip 7.25 kB）
+  - build: 1.50秒
 
 ## 今後
 
