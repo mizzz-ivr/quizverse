@@ -1,10 +1,15 @@
+import re
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import (
+    get_jwt_identity,
+    jwt_required,
+    verify_jwt_in_request,
+)
 
 from ..extensions import db
-from ..models import Choice, Question, Quiz, QuizPlay, QuizStatus
+from ..models import Choice, Question, Quiz, QuizPlay, QuizStatus, User
 from .quizzes import (
     _next_choice_id,
     _next_question_id,
@@ -13,9 +18,55 @@ from .quizzes import (
 
 quiz_editing_bp = Blueprint("quiz_editing", __name__, url_prefix="/api/me/quizzes")
 
+QUIZ_STATUS_UPDATE_PATTERN = re.compile(r"^/api/me/quizzes/(?P<quiz_id>\d+)/status$")
+QUIZ_CREATE_PATH = "/api/quizzes"
+
 
 def _editing_error(code: str, message: str, status_code: int):
     return jsonify({"error": {"code": code, "message": message}}), status_code
+
+
+def _lock_shared_id_allocation_row():
+    """Serialize the existing MAX(id) + 1 allocation used by quiz mutations."""
+    return (
+        db.session.query(User.id)
+        .order_by(User.id.asc())
+        .with_for_update()
+        .first()
+    )
+
+
+def _lock_owned_quiz(quiz_id: int, user_id: int):
+    return (
+        Quiz.query.filter_by(id=quiz_id, author_user_id=user_id)
+        .with_for_update()
+        .first()
+    )
+
+
+@quiz_editing_bp.before_app_request
+def serialize_related_quiz_mutations():
+    """Apply the same row-lock protocol to create and publication requests.
+
+    Flask executes this guard in the request-scoped SQLAlchemy session, so locks
+    remain held until the target route commits or the request is rolled back.
+    """
+    if request.method == "POST" and request.path == QUIZ_CREATE_PATH:
+        verify_jwt_in_request()
+        _lock_shared_id_allocation_row()
+        return None
+
+    status_match = QUIZ_STATUS_UPDATE_PATTERN.match(request.path)
+    if request.method == "PATCH" and status_match:
+        verify_jwt_in_request()
+        identity = get_jwt_identity()
+        try:
+            user_id = int(identity)
+        except (TypeError, ValueError):
+            return None
+        _lock_owned_quiz(int(status_match.group("quiz_id")), user_id)
+
+    return None
 
 
 def _owned_quiz_or_404(quiz_id: int, user_id: int, *, for_update: bool = False):
@@ -115,6 +166,10 @@ def get_editable_quiz(quiz_id: int):
 @jwt_required()
 def update_draft_quiz(quiz_id: int):
     user_id = int(get_jwt_identity())
+
+    # All question/choice ID allocation follows one global lock order first,
+    # then the target quiz row. This prevents cross-quiz MAX(id) + 1 races.
+    _lock_shared_id_allocation_row()
     quiz, not_found = _owned_quiz_or_404(quiz_id, user_id, for_update=True)
     if not_found:
         return not_found
