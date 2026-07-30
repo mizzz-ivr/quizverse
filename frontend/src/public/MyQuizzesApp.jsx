@@ -31,6 +31,7 @@ function Icon({ name, className = 'h-5 w-5' }) {
   if (name === 'spark') return <svg {...common}><path d="M12 3 9.8 8.8 4 11l5.8 2.2L12 19l2.2-5.8L20 11l-5.8-2.2L12 3Z" strokeWidth="1.6" strokeLinejoin="round" /></svg>
   if (name === 'plus') return <svg {...common}><path d="M12 5v14M5 12h14" strokeWidth="1.8" strokeLinecap="round" /></svg>
   if (name === 'eye') return <svg {...common}><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" strokeWidth="1.7" /><circle cx="12" cy="12" r="2.5" strokeWidth="1.7" /></svg>
+  if (name === 'edit') return <svg {...common}><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" strokeWidth="1.7" strokeLinejoin="round" /><path d="m14 7 3 3" strokeWidth="1.7" /></svg>
   if (name === 'publish') return <svg {...common}><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
   if (name === 'archive') return <svg {...common}><path d="M4 7h16M5 7l1 13h12l1-13M3 4h18v3H3V4Zm6 7h6" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
   if (name === 'draft') return <svg {...common}><path d="M6 3h9l3 3v15H6V3Z" strokeWidth="1.7" strokeLinejoin="round" /><path d="M9 11h6M9 15h5" strokeWidth="1.7" strokeLinecap="round" /></svg>
@@ -73,7 +74,7 @@ function LoginRequired() {
         <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 to-indigo-500 text-white"><Icon name="draft" className="h-8 w-8" /></span>
         <p className="mt-6 text-sm font-semibold tracking-[0.18em] text-cyan-700 dark:text-cyan-300">MY QUIZZES</p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl">マイクイズを見るにはログインが必要です</h1>
-        <p className="mx-auto mt-4 max-w-xl leading-7 text-slate-600 dark:text-slate-300">作成した下書きの確認、公開、アーカイブを行えます。</p>
+        <p className="mx-auto mt-4 max-w-xl leading-7 text-slate-600 dark:text-slate-300">作成した下書きの編集、公開、アーカイブを行えます。</p>
         <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
           <button type="button" onClick={login} className="rounded-2xl bg-slate-950 px-6 py-3 font-medium text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950">ログインする</button>
           <a href="/signup?next=/my/quizzes" className="rounded-2xl border border-slate-300 px-6 py-3 font-medium hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800">アカウントを作る</a>
@@ -98,6 +99,7 @@ function QuizActions({ quiz, pending, onStatusChange }) {
       <a href={quiz.preview_path} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800"><Icon name="eye" className="h-4 w-4" />{quiz.status === 'published' ? '公開ページ' : 'プレビュー'}</a>
       {quiz.status === 'draft' ? (
         <>
+          <a href={`/my/quizzes/${quiz.id}/edit`} className="inline-flex items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800 hover:bg-cyan-100 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-200"><Icon name="edit" className="h-4 w-4" />編集</a>
           <button type="button" disabled={disabled} onClick={() => onStatusChange(quiz, 'published')} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-60"><Icon name="publish" className="h-4 w-4" />公開する</button>
           <button type="button" disabled={disabled} onClick={() => onStatusChange(quiz, 'archived')} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:hover:bg-slate-800"><Icon name="archive" className="h-4 w-4" />保管する</button>
         </>
@@ -189,7 +191,7 @@ export function MyQuizzesApp() {
       <main className="relative z-10 mx-auto max-w-7xl px-4 py-8 md:px-6 md:py-12">
         <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-indigo-950 to-cyan-950 p-6 text-white shadow-2xl shadow-indigo-950/20 md:p-9">
           <p className="text-sm font-semibold tracking-[0.18em] text-cyan-300">QUIZ WORKSPACE</p>
-          <div className="mt-3 flex flex-col justify-between gap-6 lg:flex-row lg:items-end"><div><h1 className="text-3xl font-semibold tracking-[-0.03em] md:text-5xl">作ったクイズを、<br />公開まで育てる。</h1><p className="mt-5 max-w-2xl leading-7 text-slate-300">下書きの確認、公開、公開終了、再公開をここから管理できます。</p></div><div className="grid grid-cols-3 gap-3 text-center text-sm"><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">条件内合計</p><p className="mt-1 text-2xl font-semibold">{payload.pagination?.total ?? 0}</p></div><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">ページ内 公開中</p><p className="mt-1 text-2xl font-semibold">{counts.published ?? 0}</p></div><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">ページ内 下書き</p><p className="mt-1 text-2xl font-semibold">{counts.draft ?? 0}</p></div></div></div>
+          <div className="mt-3 flex flex-col justify-between gap-6 lg:flex-row lg:items-end"><div><h1 className="text-3xl font-semibold tracking-[-0.03em] md:text-5xl">作ったクイズを、<br />公開まで育てる。</h1><p className="mt-5 max-w-2xl leading-7 text-slate-300">下書きの編集・確認、公開、公開終了、再公開をここから管理できます。</p></div><div className="grid grid-cols-3 gap-3 text-center text-sm"><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">条件内合計</p><p className="mt-1 text-2xl font-semibold">{payload.pagination?.total ?? 0}</p></div><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">ページ内 公開中</p><p className="mt-1 text-2xl font-semibold">{counts.published ?? 0}</p></div><div className="rounded-2xl bg-white/10 p-4"><p className="text-xs text-slate-300">ページ内 下書き</p><p className="mt-1 text-2xl font-semibold">{counts.draft ?? 0}</p></div></div></div>
         </section>
 
         <section className="mt-8 flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:flex-row md:items-center md:justify-between">

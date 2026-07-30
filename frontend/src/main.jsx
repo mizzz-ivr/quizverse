@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { App } from './App'
 import { CreateQuizApp } from './public/CreateQuizApp'
+import { EditQuizApp } from './public/EditQuizApp'
 import { MyQuizzesApp } from './public/MyQuizzesApp'
 import { PublicQuizApp } from './public/PublicQuizApp'
 import { QuizDetailApp } from './public/QuizDetailApp'
@@ -36,6 +37,7 @@ let RootApp = PublicQuizRoot
 if (pathname === '/status' || pathname.startsWith('/admin')) RootApp = App
 if (pathname === '/quizzes/new') RootApp = CreateQuizApp
 if (pathname === '/my/quizzes') RootApp = MyQuizzesApp
+if (/^\/my\/quizzes\/\d+\/edit$/.test(pathname)) RootApp = EditQuizApp
 if (/^\/quizzes\/\d+$/.test(pathname)) RootApp = QuizDetailApp
 
 createRoot(document.getElementById('root')).render(
