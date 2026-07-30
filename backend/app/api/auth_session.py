@@ -1,6 +1,7 @@
 import hmac
+from urllib.parse import urlsplit
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, make_response, request
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -30,6 +31,13 @@ def _error_response(code: str, message: str, status_code: int):
     return jsonify({"error": {"code": code, "message": message}}), status_code
 
 
+def _error_http_response(code: str, message: str, status_code: int):
+    return make_response(
+        jsonify({"error": {"code": code, "message": message}}),
+        status_code,
+    )
+
+
 def _serialize_user(user: User):
     return {
         "id": str(user.id),
@@ -42,6 +50,58 @@ def _serialize_user(user: User):
 def _seconds(config_key: str) -> int:
     value = current_app.config[config_key]
     return max(1, int(value.total_seconds()))
+
+
+def _normalize_origin(value: str | None) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    parsed = urlsplit(value.strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return None
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+
+
+def _request_origin() -> tuple[str | None, bool]:
+    origin_header = request.headers.get("Origin")
+    if origin_header is not None:
+        return _normalize_origin(origin_header), True
+
+    referer_header = request.headers.get("Referer")
+    if referer_header is not None:
+        return _normalize_origin(referer_header), True
+
+    return None, False
+
+
+def _request_host_origin() -> str | None:
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip()
+    forwarded_host = request.headers.get("X-Forwarded-Host", "").split(",", 1)[0].strip()
+    scheme = forwarded_proto or request.scheme
+    host = forwarded_host or request.host
+    return _normalize_origin(f"{scheme}://{host}")
+
+
+def _trusted_browser_origins() -> set[str]:
+    configured = current_app.config.get("AUTH_TRUSTED_ORIGINS", [])
+    origins = {
+        normalized
+        for value in configured
+        if (normalized := _normalize_origin(value)) is not None
+    }
+    current_origin = _request_host_origin()
+    if current_origin:
+        origins.add(current_origin)
+    return origins
+
+
+def _browser_origin_status() -> bool | None:
+    """Return True/False for browser requests and None for non-browser clients."""
+    supplied_origin, header_present = _request_origin()
+    if not header_present:
+        return None
+    if supplied_origin is None:
+        return False
+    return supplied_origin in _trusted_browser_origins()
 
 
 def _set_session_hint(response) -> None:
@@ -92,13 +152,15 @@ def _set_auth_cookies(response, user_id: str, auth_method: str) -> None:
 
 
 def _logout_csrf_is_valid() -> bool:
-    """Allow idempotent cleanup without a session, otherwise require double submit.
-
-    Logout intentionally does not require a valid JWT so an expired access
-    token can still be removed. When a browser session hint exists, the caller
-    must prove same-origin access by echoing either readable CSRF cookie.
-    """
-    if request.cookies.get(_SESSION_HINT_COOKIE) != "1":
+    """Require double-submit proof whenever any browser session cookie exists."""
+    cookie_names = {
+        _SESSION_HINT_COOKIE,
+        current_app.config["JWT_ACCESS_COOKIE_NAME"],
+        current_app.config["JWT_ACCESS_CSRF_COOKIE_NAME"],
+        current_app.config["JWT_REFRESH_CSRF_COOKIE_NAME"],
+    }
+    session_cookie_exists = any(request.cookies.get(name) for name in cookie_names)
+    if not session_cookie_exists:
         return True
 
     header_name = current_app.config["JWT_ACCESS_CSRF_HEADER_NAME"]
@@ -106,31 +168,36 @@ def _logout_csrf_is_valid() -> bool:
     if not provided:
         return False
 
-    cookie_names = {
-        current_app.config["JWT_ACCESS_CSRF_COOKIE_NAME"],
-        current_app.config["JWT_REFRESH_CSRF_COOKIE_NAME"],
-    }
     expected_values = [
-        request.cookies.get(cookie_name)
-        for cookie_name in cookie_names
-        if request.cookies.get(cookie_name)
+        request.cookies.get(current_app.config["JWT_ACCESS_CSRF_COOKIE_NAME"]),
+        request.cookies.get(current_app.config["JWT_REFRESH_CSRF_COOKIE_NAME"]),
     ]
     return any(
-        hmac.compare_digest(provided, expected)
+        expected and hmac.compare_digest(provided, expected)
         for expected in expected_values
     )
 
 
 @auth_session_bp.after_app_request
 def attach_cookie_session(response):
-    """Convert successful browser login responses into cookie sessions.
+    """Convert successful same-origin browser logins into cookie sessions.
 
-    Existing auth routes continue to own validation and user creation. This
-    layer issues a fresh access/refresh pair and removes JWT material from JSON
-    outside tests or explicit compatibility mode.
+    Requests without Origin/Referer are treated as non-browser API clients and
+    retain the existing bearer response. Browser requests with an untrusted
+    origin are rejected before any authentication cookies are installed.
     """
     auth_method = _SESSION_ENDPOINTS.get(request.path)
     if request.method != "POST" or not auth_method or not 200 <= response.status_code < 300:
+        return response
+
+    origin_status = _browser_origin_status()
+    if origin_status is False:
+        return _error_http_response(
+            "auth/untrusted_origin",
+            "Authentication request origin is not allowed.",
+            403,
+        )
+    if origin_status is None:
         return response
 
     payload = response.get_json(silent=True)
@@ -160,6 +227,13 @@ def attach_cookie_session(response):
 @auth_session_bp.post("/refresh")
 @jwt_required(refresh=True, locations=["cookies"])
 def refresh_session():
+    if _browser_origin_status() is False:
+        return _error_response(
+            "auth/untrusted_origin",
+            "Authentication request origin is not allowed.",
+            403,
+        )
+
     identity = get_jwt_identity()
     try:
         user_id = int(identity)
@@ -204,6 +278,13 @@ def refresh_session():
 
 @auth_session_bp.post("/logout")
 def logout_session():
+    if _browser_origin_status() is False:
+        return _error_response(
+            "auth/untrusted_origin",
+            "Authentication request origin is not allowed.",
+            403,
+        )
+
     if not _logout_csrf_is_valid():
         return _error_response(
             "auth/csrf_failed",
