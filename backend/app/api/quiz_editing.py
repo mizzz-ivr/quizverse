@@ -19,6 +19,7 @@ from .quizzes import (
 quiz_editing_bp = Blueprint("quiz_editing", __name__, url_prefix="/api/me/quizzes")
 
 QUIZ_STATUS_UPDATE_PATTERN = re.compile(r"^/api/me/quizzes/(?P<quiz_id>\d+)/status$")
+QUIZ_PLAY_PATTERN = re.compile(r"^/api/quizzes/(?P<quiz_id>\d+)/play$")
 QUIZ_CREATE_PATH = "/api/quizzes"
 
 
@@ -36,6 +37,10 @@ def _lock_shared_id_allocation_row():
     )
 
 
+def _lock_quiz(quiz_id: int):
+    return Quiz.query.filter_by(id=quiz_id).with_for_update().first()
+
+
 def _lock_owned_quiz(quiz_id: int, user_id: int):
     return (
         Quiz.query.filter_by(id=quiz_id, author_user_id=user_id)
@@ -46,7 +51,7 @@ def _lock_owned_quiz(quiz_id: int, user_id: int):
 
 @quiz_editing_bp.before_app_request
 def serialize_related_quiz_mutations():
-    """Apply the same row-lock protocol to create and publication requests.
+    """Apply shared row-lock protocols to related quiz mutations.
 
     Flask executes this guard in the request-scoped SQLAlchemy session, so locks
     remain held until the target route commits or the request is rolled back.
@@ -54,6 +59,12 @@ def serialize_related_quiz_mutations():
     if request.method == "POST" and request.path == QUIZ_CREATE_PATH:
         verify_jwt_in_request()
         _lock_shared_id_allocation_row()
+        return None
+
+    play_match = QUIZ_PLAY_PATTERN.match(request.path)
+    if request.method == "POST" and play_match:
+        verify_jwt_in_request()
+        _lock_quiz(int(play_match.group("quiz_id")))
         return None
 
     status_match = QUIZ_STATUS_UPDATE_PATTERN.match(request.path)
@@ -178,7 +189,16 @@ def update_draft_quiz(quiz_id: int):
     if not_editable:
         return not_editable
 
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    elif not isinstance(payload, dict):
+        return _editing_error(
+            "quiz/validation_error",
+            "Request body must be a JSON object.",
+            400,
+        )
+
     validated, validation_error = _validate_create_quiz_payload(payload)
     if validation_error:
         return validation_error
