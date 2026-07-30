@@ -13,6 +13,7 @@ const COOKIE_SESSION_MARKER = 'cookie-session'
 
 let sessionRevision = 0
 let refreshPromise = null
+let logoutPromise = null
 
 export class ApiError extends Error {
   constructor(message, status, code = '') {
@@ -42,12 +43,14 @@ function storageAvailable() {
   return typeof localStorage !== 'undefined'
 }
 
+export function removeLegacyAuthToken() {
+  if (storageAvailable()) localStorage.removeItem(LEGACY_TOKEN_KEY)
+}
+
 export function getStoredSession() {
   if (!storageAvailable()) return null
 
-  // Remove JWTs created by older QuizVerse versions. Authentication is now
-  // represented only by HttpOnly cookies managed by the server.
-  localStorage.removeItem(LEGACY_TOKEN_KEY)
+  removeLegacyAuthToken()
 
   if (!hasSessionHint()) {
     localStorage.removeItem(USER_KEY)
@@ -68,7 +71,7 @@ export function getStoredSession() {
 
 export function saveSession({ user }, { redirect = true } = {}) {
   if (storageAvailable()) {
-    localStorage.removeItem(LEGACY_TOKEN_KEY)
+    removeLegacyAuthToken()
     localStorage.setItem(USER_KEY, JSON.stringify(user ?? null))
   }
   sessionRevision += 1
@@ -89,7 +92,7 @@ export function saveSession({ user }, { redirect = true } = {}) {
 
 function clearLocalSession() {
   if (storageAvailable()) {
-    localStorage.removeItem(LEGACY_TOKEN_KEY)
+    removeLegacyAuthToken()
     localStorage.removeItem(USER_KEY)
   }
   sessionRevision += 1
@@ -97,38 +100,6 @@ function clearLocalSession() {
 
 function logoutCsrfToken() {
   return readCookie(ACCESS_CSRF_COOKIE) ?? readCookie(REFRESH_CSRF_COOKIE)
-}
-
-export function clearSession({ notifyServer = true } = {}) {
-  clearLocalSession()
-
-  if (!notifyServer || typeof fetch !== 'function') return Promise.resolve(null)
-
-  const headers = { Accept: 'application/json' }
-  const csrfToken = logoutCsrfToken()
-  if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken
-
-  return fetch('/api/auth/logout', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers,
-  }).catch(() => null)
-}
-
-function redirectToLogin(requestRevision) {
-  if (requestRevision !== sessionRevision) return
-
-  void clearSession()
-  if (typeof window === 'undefined') return
-
-  if (window.location.pathname === '/login') {
-    window.location.reload()
-    return
-  }
-
-  const currentPath = `${window.location.pathname}${window.location.search ?? ''}`
-  const returnTo = rememberAuthReturnPath(currentPath)
-  window.location.assign(buildAuthPath('login', returnTo))
 }
 
 function normalizeQuizListPayload(payload) {
@@ -186,12 +157,83 @@ async function fetchJson(path, { method = 'GET', body, query } = {}) {
   return { response, payload }
 }
 
-async function refreshAccessToken() {
+async function performServerLogout() {
+  const { response, payload } = await fetchJson('/api/auth/logout', {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    throw new ApiError(
+      payload?.error?.message ?? 'ログアウトできませんでした。',
+      response.status,
+      payload?.error?.code ?? '',
+    )
+  }
+  return payload
+}
+
+export function clearSession({ notifyServer = true, requireServerSuccess = true } = {}) {
+  if (logoutPromise) return logoutPromise
+
+  logoutPromise = (async () => {
+    // A refresh response can reinstall cookies. Wait for it first so the
+    // subsequent logout response is always the final cookie mutation.
+    if (refreshPromise) {
+      try {
+        await refreshPromise
+      } catch {
+        // Logout still needs to clear cookies after a failed refresh.
+      }
+    }
+
+    if (notifyServer && typeof fetch === 'function') {
+      try {
+        await performServerLogout()
+      } catch (error) {
+        if (requireServerSuccess) throw error
+      }
+    }
+
+    clearLocalSession()
+    return null
+  })().finally(() => {
+    logoutPromise = null
+  })
+
+  return logoutPromise
+}
+
+function invalidateSessionAfterAuthFailure() {
+  clearLocalSession()
+  if (typeof fetch === 'function') void performServerLogout().catch(() => null)
+}
+
+function redirectToLogin(requestRevision) {
+  if (requestRevision !== sessionRevision) return
+
+  invalidateSessionAfterAuthFailure()
+  if (typeof window === 'undefined') return
+
+  if (window.location.pathname === '/login') {
+    window.location.reload()
+    return
+  }
+
+  const currentPath = `${window.location.pathname}${window.location.search ?? ''}`
+  const returnTo = rememberAuthReturnPath(currentPath)
+  window.location.assign(buildAuthPath('login', returnTo))
+}
+
+async function refreshAccessToken(expectedRevision) {
+  if (logoutPromise) {
+    throw new ApiError('Logout is in progress.', 401, 'auth/logout_in_progress')
+  }
+  if (expectedRevision !== sessionRevision) return null
   if (!hasSessionHint()) {
     throw new ApiError('Refresh session is unavailable.', 401, 'auth/missing_refresh_token')
   }
 
   if (!refreshPromise) {
+    const refreshRevision = sessionRevision
     refreshPromise = (async () => {
       const { response, payload } = await fetchJson('/api/auth/refresh', {
         method: 'POST',
@@ -203,7 +245,13 @@ async function refreshAccessToken() {
           payload?.error?.code ?? '',
         )
       }
-      if (payload?.user) saveSession(payload, { redirect: false })
+      if (
+        payload?.user
+        && refreshRevision === sessionRevision
+        && !logoutPromise
+      ) {
+        saveSession(payload, { redirect: false })
+      }
       return payload
     })().finally(() => {
       refreshPromise = null
@@ -238,7 +286,12 @@ async function request(
       && hasSessionHint()
     ) {
       try {
-        await refreshAccessToken()
+        // Another request may have completed refresh after this request began.
+        // In that case retry directly instead of issuing a second refresh.
+        if (requestRevision === sessionRevision) {
+          await refreshAccessToken(requestRevision)
+        }
+        if (logoutPromise) throw new Error('logout in progress')
         return request(path, {
           method,
           body,
@@ -255,7 +308,7 @@ async function request(
     if (response.status === 401 && auth === 'required') {
       redirectToLogin(requestRevision)
     } else if (response.status === 401 && auth === 'optional' && requestRevision === sessionRevision) {
-      void clearSession()
+      invalidateSessionAfterAuthFailure()
     }
 
     throw new ApiError(message, response.status, code)
@@ -273,7 +326,7 @@ export const publicApi = {
     method: 'POST',
     body: values,
   }),
-  logout: () => request('/api/auth/logout', { method: 'POST' }),
+  logout: () => clearSession(),
   me: (_legacyAccessToken) => request('/api/auth/me', { auth: 'required' }),
   createQuiz: (values, _legacyAccessToken) => request('/api/quizzes', {
     method: 'POST',
