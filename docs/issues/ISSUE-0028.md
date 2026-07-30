@@ -214,7 +214,13 @@ cd backend && PYTHONPATH=. pytest
 
 ## 確認結果
 
-最終CIの実測値をPRマージ前に反映する。
+- フロントエンドテスト: `34 passed, 0 failed`
+- バックエンドテスト: `67 passed, 1 warning`（7.96秒）
+- フロントエンドProduction Build: 成功
+  - JavaScript: 268.91 kB（gzip 74.05 kB）
+  - CSS: 42.80 kB（gzip 7.25 kB）
+  - build: 1.44秒
+- 既存警告: `User.query.get()` に関するSQLAlchemy 2.x LegacyAPIWarning
 
 ## 対象外
 
