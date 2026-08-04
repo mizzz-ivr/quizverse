@@ -27,7 +27,6 @@ def upgrade():
         "users",
         sa.Column("role", user_role, nullable=False, server_default="user"),
     )
-    op.alter_column("users", "role", server_default=None)
 
 
 def downgrade():
