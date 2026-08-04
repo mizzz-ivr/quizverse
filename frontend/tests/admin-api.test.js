@@ -82,6 +82,54 @@ test('管理設定の更新へaccess CSRFヘッダーを付与する', async () 
   assert.equal(updateCall.options.headers['X-Admin-Mode'], undefined)
 })
 
+test('管理ユーザー一覧へ検索・ロール・状態フィルターを送信する', async () => {
+  const calls = []
+  globalThis.fetch = async (path, options) => {
+    calls.push({ path, options })
+    if (path === '/api/auth/me') {
+      return response(200, { user: { id: '1', display_name: 'Admin' } })
+    }
+    return response(200, { items: [], pagination: { total: 0 } })
+  }
+
+  await adminApi.users({ page: 2, perPage: 10, q: 'alice', role: 'admin', status: 'active' })
+
+  const call = calls.find((item) => item.path.startsWith('/api/admin/users?'))
+  assert.ok(call)
+  const url = new URL(call.path, 'http://localhost:5173')
+  assert.equal(url.searchParams.get('page'), '2')
+  assert.equal(url.searchParams.get('per_page'), '10')
+  assert.equal(url.searchParams.get('q'), 'alice')
+  assert.equal(url.searchParams.get('role'), 'admin')
+  assert.equal(url.searchParams.get('status'), 'active')
+  assert.equal(call.options.credentials, 'same-origin')
+})
+
+test('ロールと状態更新はPATCH・Cookie・CSRFで送信する', async () => {
+  const calls = []
+  globalThis.fetch = async (path, options) => {
+    calls.push({ path, options })
+    if (path === '/api/auth/me') {
+      return response(200, { user: { id: '1', display_name: 'Admin' } })
+    }
+    return response(200, { user: { id: '2' }, meta: { changed: true } })
+  }
+
+  await adminApi.updateUserRole('2', 'admin')
+  await adminApi.updateUserStatus('2', 'suspended')
+
+  const roleCall = calls.find((item) => item.path === '/api/admin/users/2/role')
+  const statusCall = calls.find((item) => item.path === '/api/admin/users/2/status')
+  for (const call of [roleCall, statusCall]) {
+    assert.equal(call.options.method, 'PATCH')
+    assert.equal(call.options.credentials, 'same-origin')
+    assert.equal(call.options.headers['X-CSRF-TOKEN'], 'admin-csrf')
+    assert.equal(call.options.headers.Authorization, undefined)
+  }
+  assert.deepEqual(JSON.parse(roleCall.options.body), { role: 'admin' })
+  assert.deepEqual(JSON.parse(statusCall.options.body), { status: 'suspended' })
+})
+
 test('一般ユーザーの403をApiErrorとして返す', async () => {
   globalThis.fetch = async (path) => {
     if (path === '/api/auth/me') {
