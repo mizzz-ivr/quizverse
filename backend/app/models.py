@@ -26,6 +26,11 @@ class UserStatus(enum.Enum):
     withdrawn = "withdrawn"
 
 
+class UserRole(enum.Enum):
+    user = "user"
+    admin = "admin"
+
+
 class OauthProvider(enum.Enum):
     google = "google"
 
@@ -73,6 +78,12 @@ class User(TimestampMixin, db.Model):
     email = db.Column(db.String(255), nullable=False, unique=True)
     display_name = db.Column(db.String(80), nullable=False)
     status = db.Column(db.Enum(UserStatus, name="user_status"), nullable=False, default=UserStatus.active)
+    role = db.Column(
+        db.Enum(UserRole, name="user_role"),
+        nullable=False,
+        default=UserRole.user,
+        server_default=UserRole.user.value,
+    )
     avatar_url = db.Column(db.String(500), nullable=True)
     password_hash = db.Column(db.String(255), nullable=True)
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
