@@ -26,6 +26,14 @@ ISSUE-0038で管理APIをDBロールベースのRBACへ移行したが、管理�
 - 対象ユーザー不存在は404
 - 一覧・詳細ではメールアドレスをマスクし、パスワードハッシュ、OAuth識別子、OTP、JWTを返さない
 
+### 並行実行時のactive admin保護
+
+対象行だけをロックして件数を数える方式では、2人の管理者が同時に相互降格・停止した場合、両トランザクションが変更前の件数を参照する可能性がある。
+
+PostgreSQLでは、role/status変更の冒頭で全管理者変更に共通する`pg_advisory_xact_lock`を取得する。対象行の`FOR UPDATE`とactive admin数確認は、その共有ロック取得後に実行する。ロックはcommit/rollbackまで保持されるため、後続操作は先行変更の確定後に最新件数を確認する。
+
+SQLiteはテスト専用であり、DBレベルのwrite serializationを利用する。
+
 ## 監査ログ
 
 ロール・状態が実際に変更された場合だけ`audit_logs`へ記録する。
@@ -39,6 +47,8 @@ ISSUE-0038で管理APIをDBロールベースのRBACへ移行したが、管理�
 - `metadata.actor_role`: 操作時の管理者ロール
 
 同一値への更新は成功扱いだが、監査ログは追加しない。
+
+本番PostgreSQLでは`audit_logs.id`を明示指定せず、既存のBIGSERIALシーケンスへ原子的な採番を委ねる。in-memory SQLiteの既存BIGINTテストスキーマだけはROWID自動採番にならないため、テスト互換用IDをアプリ側で補う。
 
 ## 停止アカウントの認証境界
 
@@ -54,7 +64,7 @@ Flask-JWT-Extendedの追加検証コールバックで、数値ユーザーIDを
 - OTP request / verify
 - パスワードログイン・Google OAuthログインの成功レスポンスからのセッション発行
 
-開発用の非数値identityは既存dev-token互換のため、ユーザーstatus検証対象外とする。本番では`AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false`を維持する。
+ユーザー不存在時は共通JWT検証で応答を上書きせず、各既存APIの401/404契約を維持する。開発用の非数値identityは既存dev-token互換のため、ユーザーstatus検証対象外とする。本番では`AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false`を維持する。
 
 ## フロントエンド
 
@@ -74,18 +84,27 @@ Flask-JWT-Extendedの追加検証コールバックで、数値ユーザーIDを
 
 新規migrationは不要。既存の`users.role`、`users.status`、`audit_logs`を使用する。
 
-## テスト対象
+## テスト結果
 
-- 管理APIの401/403
+- バックエンド: 103件成功
+- フロントエンド: 54件成功、失敗0件
+- Production Build: 成功
+  - JavaScript: 287.43 kB（gzip 78.29 kB）
+  - CSS: 44.33 kB（gzip 7.54 kB）
+  - build: 1.53秒
+
+追加確認:
+
+- 管理APIの401/403/409境界
 - 検索・フィルター・ページング
 - role/status更新
 - 自己変更拒否
-- active admin保護
-- audit_logsのbefore/after
+- active admin変更の共有advisory lock
+- audit_logsのbefore/afterとSQLite互換ID
 - 不正値400
 - 停止ユーザーのlogin/OTP/access JWT/refresh拒否
+- ユーザー不存在時の既存API契約
 - 管理APIクライアントのCookie・CSRF契約
-- フロントエンドテスト・Production Build
 
 ## 対象外
 
