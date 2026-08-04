@@ -49,6 +49,9 @@ class Config:
     AUTH_ENABLE_DEV_TOKEN_ENDPOINT = _env_bool(
         "AUTH_ENABLE_DEV_TOKEN_ENDPOINT", "true"
     )
+    ADMIN_BOOTSTRAP_EMAILS = [
+        value.lower() for value in _env_list("ADMIN_BOOTSTRAP_EMAILS", "")
+    ]
     GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
     EMAIL_SETTINGS_ENCRYPTION_KEY = os.getenv("EMAIL_SETTINGS_ENCRYPTION_KEY")
     QUIZ_PUBLICATION_ENFORCED = _env_bool("QUIZ_PUBLICATION_ENFORCED", "true")
