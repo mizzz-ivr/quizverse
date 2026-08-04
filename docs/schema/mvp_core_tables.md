@@ -11,10 +11,14 @@
 - ユーザー基本情報。
 - `email` はユニーク。
 - `status`: `active/suspended/withdrawn`。
+- `role`: `user/admin`。ISSUE-0038で追加し、既定値は`user`。
+- 管理APIはJWTの有効性に加えて、DB上の`status=active`と`role=admin`を毎回確認する。
 
 ### user_oauth_accounts
 - OAuthプロバイダ連携情報（MVPではGoogle想定）。
 - `provider + provider_user_id` をユニーク制約。
+- Google ID tokenの`email_verified`確認後に作成される。
+- `ADMIN_BOOTSTRAP_EMAILS`を使う初期管理者昇格では、同じメールアドレスのGoogle連携が存在することを所有確認として利用する。
 
 ### otp_verifications
 - OTP検証履歴。
@@ -73,3 +77,4 @@
 - `audit_logs.metadata` の構造はイベントごとに運用で定義。
 - メール設定は `email_settings` 単一レコード管理（MVP仮置き）。
 - `smtp_password_encrypted` の暗号鍵運用（ローテーション/復旧）は後続Issueで設計。
+- 管理画面からのロール変更、最終管理者保護、ユーザー停止操作はISSUE-0038の対象外。
