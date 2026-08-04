@@ -84,6 +84,7 @@ ADMIN_BOOTSTRAP_EMAILS=admin@example.com
 - `/api/status`
 - `/status`
 - `/admin`
+- `/admin/users`
 - `/api/admin/session`
 
 ### DBマイグレーション
@@ -94,7 +95,7 @@ cd backend
 DATABASE_URL='<production database url>' flask --app app db upgrade
 ```
 
-管理者RBACではrevision `20260804_0009`で`users.role`を追加します。新しいアプリを配信する前に、対象DBへこのmigrationを適用してください。
+管理者RBACではrevision `20260804_0009`で`users.role`を追加します。新しいアプリを配信する前に、対象DBへこのmigrationを適用してください。ISSUE-0040は既存の`users.role/status`と`audit_logs`を利用するため追加migrationはありません。
 
 ## DBマイグレーション
 ```bash
@@ -178,36 +179,44 @@ npm --prefix frontend run build
 
 `quizverse_session_hint`はJWTを含まないセッション候補のヒントです。認証済みかどうかの最終確認は`GET /api/auth/me`で行います。CLI・既存APIクライアント向けのAuthorizationヘッダーJWT互換は残しますが、一般ユーザー向けWeb画面からは送信しません。
 
-## 管理者RBAC（ISSUE-0038）
+## 管理者RBAC・ユーザー管理（ISSUE-0038, ISSUE-0040）
 
 管理画面と管理APIは、DB上の`users.role=admin`で保護します。ブラウザの`localStorage`や`X-Admin-Mode`は管理者判定に使用しません。
 
 - 未認証: 401
 - 一般ユーザー: 403
-- `suspended` / `withdrawn`: 403
+- `suspended` / `withdrawn`: 403 `auth/account_inactive`
 - `active`かつ`admin`: 利用可能
 - 認可時はJWT claimだけでなくDB上の現在ロールと状態を確認
 - 初期管理者の自動昇格は、設定メールと一致する確認済みGoogle OAuth連携を必須とする
 - 管理画面はHttpOnly Cookie認証を利用
-- SMTP設定更新などの状態変更はCSRF二重送信で保護
-- ユーザー一覧はメールアドレスをマスクし、パスワードハッシュを返さない
+- PATCH/PUTはCSRF二重送信で保護
+- ユーザー一覧・詳細はメールアドレスをマスクし、パスワードハッシュ等を返さない
+- 自分自身の降格・停止を禁止
+- role/status変更を`audit_logs`へbefore/after付きで記録
+- 停止後は期限内のaccess JWT・refresh CookieもDBの現在statusで拒否
 
 管理API:
 
 - `GET /api/admin/session`: 現在の管理者セッションを確認
 - `GET /api/admin/overview`: 管理ダッシュボード集計
-- `GET /api/admin/users`: ユーザー一覧
+- `GET /api/admin/users`: 検索・role/statusフィルター・ページング対応のユーザー一覧
+- `GET /api/admin/users/{user_id}`: マスク済みユーザー詳細
+- `PATCH /api/admin/users/{user_id}/role`: role変更
+- `PATCH /api/admin/users/{user_id}/status`: active/suspended/withdrawn変更
 - `GET /api/admin/quizzes`: クイズ一覧
 - `GET /api/admin/email-settings`: SMTP設定取得
 - `PUT /api/admin/email-settings`: SMTP設定更新
 - `GET /api/admin/status`: 内部サービスステータス
 
-## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030, ISSUE-0032, ISSUE-0034, ISSUE-0038）
+## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030, ISSUE-0032, ISSUE-0034, ISSUE-0038, ISSUE-0040）
 - JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `JWT_REFRESH_TOKEN_EXPIRES_SECONDS`, `JWT_COOKIE_SECURE`）。
 - ブラウザはHttpOnly Cookie認証、状態変更APIはCSRF二重送信を利用します。
 - OTP設定は環境変数で管理します（例: `OTP_EXPIRES_SECONDS`, `OTP_MIN_RESEND_SECONDS`, `OTP_MAX_REQUESTS_PER_HOUR`, `OTP_MAX_VERIFY_ATTEMPTS`）。
 - Google OAuth ログインを利用する場合は `GOOGLE_OAUTH_CLIENT_ID` を設定してください。
 - メール設定暗号化キーは `EMAIL_SETTINGS_ENCRYPTION_KEY` で指定できます。未指定時は `SECRET_KEY` から導出した鍵を仮利用します。
+- 数値ユーザーIDを持つJWTは、全`jwt_required`経路でDBの現在statusを検証します。
+- `suspended/withdrawn`はlogin、OTP、access JWT、refresh Cookieを403で拒否します。
 - 本実装済みエンドポイント
   - `POST /api/quizzes`: JWT必須。クイズ本体 + 問題 + 選択肢を下書きとして一括作成（各問題2〜6択、正答は1つ）
   - `GET /api/quizzes`: `published` のクイズ一覧を取得（`q` キーワード検索, `category` 完全一致, `page`/`per_page` ページング）
@@ -221,7 +230,10 @@ npm --prefix frontend run build
   - `PATCH /api/me/quizzes/{quiz_id}/status`: JWT必須。本人所有クイズの `draft / published / archived` を変更
   - `GET /api/admin/session`: adminロール必須。管理者セッションを返却
   - `GET /api/admin/overview`: adminロール必須。管理ダッシュボード向けサマリー
-  - `GET /api/admin/users`: adminロール必須。メールをマスクしたユーザー一覧
+  - `GET /api/admin/users`: adminロール必須。検索・フィルター付きユーザー一覧
+  - `GET /api/admin/users/{user_id}`: adminロール必須。ユーザー詳細
+  - `PATCH /api/admin/users/{user_id}/role`: adminロール必須。ロール変更と監査記録
+  - `PATCH /api/admin/users/{user_id}/status`: adminロール必須。状態変更と監査記録
   - `GET /api/admin/quizzes`: adminロール必須。作成者・ステータス・プレイ数を含むクイズ一覧
   - `GET /api/admin/email-settings`: adminロール必須。機密値をマスクしたメール設定取得
   - `PUT /api/admin/email-settings`: adminロール必須。SMTPパスワードを更新時のみ受け取り
@@ -244,63 +256,20 @@ npm --prefix frontend run build
 
 ## ドキュメント
 - ロードマップ: `docs/roadmap.md`
-- Issue: `docs/issues/ISSUE-0001.md`
-- Issue: `docs/issues/ISSUE-0002.md`
-- Issue: `docs/issues/ISSUE-0003.md`
-- Issue: `docs/issues/ISSUE-0004.md`
-- Issue: `docs/issues/ISSUE-0005.md`
-- Issue: `docs/issues/ISSUE-0006.md`
-- Issue: `docs/issues/ISSUE-0007.md`
-- Issue: `docs/issues/ISSUE-0008.md`
-- Issue: `docs/issues/ISSUE-0009.md`
-- Issue: `docs/issues/ISSUE-0010.md`
-- Issue: `docs/issues/ISSUE-0011.md`
-- Issue: `docs/issues/ISSUE-0014.md`
-- Issue: `docs/issues/ISSUE-0015.md`
-- Issue: `docs/issues/ISSUE-0016.md`
-- Issue: `docs/issues/ISSUE-0017.md`
-- Issue: `docs/issues/ISSUE-0018.md`
-- Issue: `docs/issues/ISSUE-0020.md`
-- Issue: `docs/issues/ISSUE-0024.md`
-- Issue: `docs/issues/ISSUE-0026.md`
-- Issue: `docs/issues/ISSUE-0028.md`
-- Issue: `docs/issues/ISSUE-0030.md`
-- Issue: `docs/issues/ISSUE-0032.md`
-- Issue: `docs/issues/ISSUE-0034.md`
-- Issue: `docs/issues/ISSUE-0036.md`
+- Issue仕様: `docs/issues/`
 - Issue: `docs/issues/ISSUE-0038.md`
+- Issue: `docs/issues/ISSUE-0040.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
-- Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
-- Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
-- Qiita下書き: `docs/qiita/ISSUE-0003_mvp_db_design.md`
-- Qiita下書き: `docs/qiita/ISSUE-0004_jwt_auth_foundation.md`
-- Qiita下書き: `docs/qiita/ISSUE-0005_email_register_login.md`
-- Qiita下書き: `docs/qiita/ISSUE-0006_google_oauth_login.md`
-- Qiita下書き: `docs/qiita/ISSUE-0007_otp_verification_foundation.md`
-- Qiita下書き: `docs/qiita/ISSUE-0008_quiz_create_api.md`
-- Qiita下書き: `docs/qiita/ISSUE-0009_quiz_list_search_detail_api.md`
-- Qiita下書き: `docs/qiita/ISSUE-0010_quiz_play_scoring_api.md`
-- Qiita下書き: `docs/qiita/ISSUE-0011_ranking_api.md`
-- Qiita下書き: `docs/qiita/ISSUE-0014_admin_dashboard_foundation.md`
-- Qiita下書き: `docs/qiita/ISSUE-0015_email_settings_ui_and_smtp_api.md`
-- Qiita下書き: `docs/qiita/ISSUE-0016_service_status_page_and_ops_visibility.md`
-- Qiita下書き: `docs/qiita/ISSUE-0017_vercel_deployment_foundation.md`
-- Qiita下書き: `docs/qiita/ISSUE-0018_public_quiz_experience_ui.md`
-- Qiita下書き: `docs/qiita/ISSUE-0024_quiz_create_ui.md`
-- Qiita下書き: `docs/qiita/ISSUE-0026_quiz_publication_management.md`
-- Qiita下書き: `docs/qiita/ISSUE-0028_draft_quiz_editing.md`
-- Qiita下書き: `docs/qiita/ISSUE-0030_cookie_auth_session.md`
-- Qiita下書き: `docs/qiita/ISSUE-0032_cross_tab_auth_lock.md`
-- Qiita下書き: `docs/qiita/ISSUE-0034_sqlalchemy2_legacy_api_cleanup.md`
-- Qiita下書き: `docs/qiita/ISSUE-0036_github_actions_node24_runtime.md`
 - Qiita下書き: `docs/qiita/ISSUE-0038_admin_rbac_foundation.md`
+- Qiita下書き: `docs/qiita/ISSUE-0040_admin_user_management.md`
 
-## フロントエンド（管理ダッシュボード / ISSUE-0014, ISSUE-0038）
-- `/admin`配下は専用`AdminApp`で表示します。
-- 起動時に`GET /api/admin/session`でサーバー側の実ロールを確認します。
-- 一般ユーザーには403の権限不足画面、未ログインユーザーにはログイン導線を表示します。
-- 管理APIはHttpOnly Cookieを利用し、状態変更時はCSRFヘッダーを送信します。
-- ブラウザから切り替え可能な管理者モードと`X-Admin-Mode`は使用しません。
+## フロントエンド（管理ダッシュボード / ISSUE-0014, ISSUE-0038, ISSUE-0040）
+- `/admin`配下はサーバー側の実ロールを確認して表示します。
+- `/admin/users`は検索・フィルター・ページング・詳細・role/status変更に対応します。
+- PCではテーブル、モバイルではカードで表示します。
+- 自己降格・自己停止はUIとAPIの両方で禁止します。
+- 状態変更後は一覧と詳細を再取得します。
+- 管理APIはHttpOnly Cookieを利用し、PATCH/PUTではCSRFヘッダーを送信します。
 
 ## フロントエンド（サービス状況表示 / ISSUE-0016）
 - 公開向けステータスページを `/status` として実装。
