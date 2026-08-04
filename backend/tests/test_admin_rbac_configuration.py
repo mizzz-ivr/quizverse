@@ -22,3 +22,5 @@ def test_user_role_migration_follows_current_head():
     assert 'op.add_column(' in migration
     assert '"users"' in migration
     assert '"role"' in migration
+    assert 'server_default="user"' in migration
+    assert 'server_default=None' not in migration
