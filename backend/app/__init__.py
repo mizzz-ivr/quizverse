@@ -1,6 +1,10 @@
 from flask import Flask
 
 from .api.admin import admin_bp
+from .api.admin_user_management import (
+    admin_user_management_bp,
+    install_admin_user_list_view,
+)
 from .api.auth import auth_bp
 from .api.auth_session import auth_session_bp
 from .api import auth_origin_guard  # noqa: F401
@@ -25,6 +29,8 @@ def create_app(config_class=Config):
 
     app.register_blueprint(health_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(admin_user_management_bp)
+    install_admin_user_list_view(app)
     app.register_blueprint(auth_bp)
     app.register_blueprint(auth_session_bp)
     app.register_blueprint(quiz_editing_bp)

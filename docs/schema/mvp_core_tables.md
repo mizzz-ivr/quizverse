@@ -11,14 +11,14 @@
 - ユーザー基本情報。
 - `email` はユニーク。
 - `status`: `active/suspended/withdrawn`。
-- `role`: `user/admin`。ISSUE-0038で追加し、既定値は`user`。
-- 管理APIはJWTの有効性に加えて、DB上の`status=active`と`role=admin`を毎回確認する。
+- ISSUE-0038で`role`: `user/admin`を追加。DB既定値は`user`。
+- ISSUE-0040では既存の`role/status`を管理APIから更新する。物理削除は行わない。
+- `suspended/withdrawn`はDBの現在値をJWT追加検証で参照し、access/refreshを含む保護APIから拒否する。
 
 ### user_oauth_accounts
 - OAuthプロバイダ連携情報（MVPではGoogle想定）。
 - `provider + provider_user_id` をユニーク制約。
-- Google ID tokenの`email_verified`確認後に作成される。
-- `ADMIN_BOOTSTRAP_EMAILS`を使う初期管理者昇格では、同じメールアドレスのGoogle連携が存在することを所有確認として利用する。
+- 初期管理者の自動昇格では、Google ID tokenの`email_verified`確認後に作成された同一メールの連携を所有確認証跡として利用する。
 
 ### otp_verifications
 - OTP検証履歴。
@@ -65,6 +65,15 @@
 ### audit_logs
 - 監査ログ最小構成。
 - 操作者、操作種別、対象エンティティ、メタ情報(JSON)を保持。
+- ISSUE-0040のユーザーロール・状態変更では次を保存する。
+  - `actor_user_id`: 操作した管理者
+  - `action`: `update`
+  - `entity_type`: `user`
+  - `entity_id`: 対象ユーザーID
+  - `metadata.field`: `role`または`status`
+  - `metadata.before / metadata.after`: 変更前後
+  - `metadata.actor_role`: 操作時ロール
+- 同一値への更新では監査ログを追加しない。
 
 ## 仮置き仕様（後続Issueで確定）
 
@@ -74,7 +83,6 @@
 - クイズ作成時の `quizzes.status` は `draft` 固定（公開制御は後続Issue）。
 - OTP送信チャネルは現時点で `email` のみ実装。`phone` はAPIインターフェースのみ先行。
 - ランキング集計バッチの実行タイミング（日次/時間単位）は未確定。
-- `audit_logs.metadata` の構造はイベントごとに運用で定義。
 - メール設定は `email_settings` 単一レコード管理（MVP仮置き）。
 - `smtp_password_encrypted` の暗号鍵運用（ローテーション/復旧）は後続Issueで設計。
-- 管理画面からのロール変更、最終管理者保護、ユーザー停止操作はISSUE-0038の対象外。
+- 監査ログの閲覧UI・保存期間・外部転送は後続Issueで設計。

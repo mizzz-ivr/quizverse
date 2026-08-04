@@ -67,8 +67,21 @@ async function request(path, { method = 'GET', body, query } = {}) {
 export const adminApi = {
   session: () => request('/api/admin/session'),
   overview: () => request('/api/admin/overview'),
-  users: ({ page = 1, perPage = 20 } = {}) =>
-    request('/api/admin/users', { query: { page, per_page: perPage } }),
+  users: ({ page = 1, perPage = 20, q = '', role = '', status = '' } = {}) =>
+    request('/api/admin/users', {
+      query: { page, per_page: perPage, q, role, status },
+    }),
+  user: (userId) => request(`/api/admin/users/${encodeURIComponent(userId)}`),
+  updateUserRole: (userId, role) =>
+    request(`/api/admin/users/${encodeURIComponent(userId)}/role`, {
+      method: 'PATCH',
+      body: { role },
+    }),
+  updateUserStatus: (userId, status) =>
+    request(`/api/admin/users/${encodeURIComponent(userId)}/status`, {
+      method: 'PATCH',
+      body: { status },
+    }),
   quizzes: ({ page = 1, perPage = 20 } = {}) =>
     request('/api/admin/quizzes', { query: { page, per_page: perPage } }),
   emailSettings: () => request('/api/admin/email-settings'),

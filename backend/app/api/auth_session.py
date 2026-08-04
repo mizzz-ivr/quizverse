@@ -12,9 +12,10 @@ from flask_jwt_extended import (
     set_refresh_cookies,
     unset_jwt_cookies,
 )
+from sqlalchemy import func
 
-from ..extensions import db
-from ..models import User
+from ..extensions import db, jwt
+from ..models import User, UserStatus
 
 
 auth_session_bp = Blueprint("auth_session", __name__, url_prefix="/api/auth")
@@ -24,6 +25,7 @@ _SESSION_ENDPOINTS = {
     "/api/auth/login": "password",
     "/api/auth/google": "google",
 }
+_OTP_ENDPOINTS = {"/api/auth/otp/request", "/api/auth/otp/verify"}
 _SESSION_HINT_COOKIE = "quizverse_session_hint"
 
 
@@ -35,6 +37,14 @@ def _error_http_response(code: str, message: str, status_code: int):
     return make_response(
         jsonify({"error": {"code": code, "message": message}}),
         status_code,
+    )
+
+
+def _inactive_account_response():
+    return _error_response(
+        "auth/account_inactive",
+        "This account is not active.",
+        403,
     )
 
 
@@ -178,6 +188,55 @@ def _logout_csrf_is_valid() -> bool:
     )
 
 
+def _user_from_identity(identity):
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        return None, False
+    return db.session.get(User, user_id), True
+
+
+@jwt.token_verification_loader
+def verify_active_user_token(_jwt_header, jwt_payload):
+    user, is_user_identity = _user_from_identity(jwt_payload.get("sub"))
+    if not is_user_identity or user is None:
+        # Missing-user response contracts differ by endpoint. Let the endpoint
+        # preserve its existing 401/404 behavior and reject only known inactive
+        # accounts at this shared JWT boundary.
+        return True
+    return user.status == UserStatus.active
+
+
+@jwt.token_verification_failed_loader
+def handle_inactive_user_token(_jwt_header, jwt_payload):
+    user, _is_user_identity = _user_from_identity(jwt_payload.get("sub"))
+    if user and user.status != UserStatus.active:
+        return _inactive_account_response()
+    return _error_response(
+        "auth/invalid_token",
+        "Authentication token is invalid.",
+        401,
+    )
+
+
+@auth_session_bp.before_app_request
+def reject_inactive_otp_account():
+    if request.method != "POST" or request.path not in _OTP_ENDPOINTS:
+        return None
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return None
+    destination = payload.get("destination")
+    if not isinstance(destination, str) or not destination.strip():
+        return None
+
+    user = User.query.filter(func.lower(User.email) == destination.strip().lower()).first()
+    if user and user.status != UserStatus.active:
+        return _inactive_account_response()
+    return None
+
+
 @auth_session_bp.after_app_request
 def attach_cookie_session(response):
     """Convert successful same-origin browser logins into cookie sessions.
@@ -190,6 +249,20 @@ def attach_cookie_session(response):
     if request.method != "POST" or not auth_method or not 200 <= response.status_code < 300:
         return response
 
+    payload = response.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return response
+
+    serialized_user = payload.get("user")
+    user_id = serialized_user.get("id") if isinstance(serialized_user, dict) else None
+    user, is_user_identity = _user_from_identity(user_id)
+    if is_user_identity and user and user.status != UserStatus.active:
+        return _error_http_response(
+            "auth/account_inactive",
+            "This account is not active.",
+            403,
+        )
+
     origin_status = _browser_origin_status()
     if origin_status is False:
         return _error_http_response(
@@ -199,17 +272,10 @@ def attach_cookie_session(response):
         )
     if origin_status is None:
         return response
-
-    payload = response.get_json(silent=True)
-    if not isinstance(payload, dict):
+    if not user:
         return response
 
-    user = payload.get("user")
-    user_id = user.get("id") if isinstance(user, dict) else None
-    if user_id is None:
-        return response
-
-    _set_auth_cookies(response, str(user_id), auth_method)
+    _set_auth_cookies(response, str(user.id), auth_method)
 
     expose_token = current_app.testing or current_app.config.get(
         "AUTH_EXPOSE_TOKEN_IN_RESPONSE", False
