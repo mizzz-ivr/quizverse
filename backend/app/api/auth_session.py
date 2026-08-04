@@ -199,19 +199,22 @@ def _user_from_identity(identity):
 @jwt.token_verification_loader
 def verify_active_user_token(_jwt_header, jwt_payload):
     user, is_user_identity = _user_from_identity(jwt_payload.get("sub"))
-    if not is_user_identity:
+    if not is_user_identity or user is None:
+        # Missing-user response contracts differ by endpoint. Let the endpoint
+        # preserve its existing 401/404 behavior and reject only known inactive
+        # accounts at this shared JWT boundary.
         return True
-    return bool(user and user.status == UserStatus.active)
+    return user.status == UserStatus.active
 
 
 @jwt.token_verification_failed_loader
 def handle_inactive_user_token(_jwt_header, jwt_payload):
-    user, is_user_identity = _user_from_identity(jwt_payload.get("sub"))
-    if is_user_identity and user and user.status != UserStatus.active:
+    user, _is_user_identity = _user_from_identity(jwt_payload.get("sub"))
+    if user and user.status != UserStatus.active:
         return _inactive_account_response()
     return _error_response(
-        "auth/user_not_found",
-        "User associated with token was not found.",
+        "auth/invalid_token",
+        "Authentication token is invalid.",
         401,
     )
 
