@@ -187,15 +187,14 @@ headers['X-CSRF-TOKEN'] = readCookie('quizverse_csrf_access')
 
 ## CI結果
 
-初回実装時点では次の結果でした。
+レビュー対応後の最終結果です。
 
-- バックエンド: 94件成功
-- フロントエンド: 52件成功
+- バックエンド: 95件成功
+- フロントエンド: 52件成功、失敗0件
 - Production Build: 成功
 - JavaScript: 272.17 kB（gzip 75.09 kB）
 - CSS: 42.93 kB（gzip 7.33 kB）
-
-レビュー後はメール所有確認テストとmigration互換テストを追加して再実行します。
+- build: 1.42秒
 
 ## デプロイ時の注意
 
