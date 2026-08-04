@@ -126,6 +126,30 @@ def _serialize_admin_mutation():
         )
 
 
+def _revalidate_actor_after_lock():
+    """Refresh the actor after waiting for the shared mutation lock.
+
+    The initial admin_required check can happen before another transaction
+    demotes or deactivates this actor. Refreshing with a row lock closes that
+    time-of-check/time-of-use gap before any target mutation is allowed.
+    """
+    actor = g.current_user
+    db.session.refresh(actor, with_for_update=True)
+    if actor.status != UserStatus.active:
+        return _error_response(
+            "auth/account_inactive",
+            "This account is not active.",
+            403,
+        )
+    if actor.role != UserRole.admin:
+        return _error_response(
+            "admin/forbidden",
+            "Admin role is required.",
+            403,
+        )
+    return None
+
+
 def _active_admin_count():
     return int(
         db.session.query(func.count(User.id))
@@ -262,6 +286,11 @@ def patch_admin_user_role(user_id):
 
     try:
         _serialize_admin_mutation()
+        actor_error = _revalidate_actor_after_lock()
+        if actor_error:
+            db.session.rollback()
+            return actor_error
+
         target, error = _load_target(user_id, lock=True)
         if error:
             db.session.rollback()
@@ -318,6 +347,11 @@ def patch_admin_user_status(user_id):
 
     try:
         _serialize_admin_mutation()
+        actor_error = _revalidate_actor_after_lock()
+        if actor_error:
+            db.session.rollback()
+            return actor_error
+
         target, error = _load_target(user_id, lock=True)
         if error:
             db.session.rollback()
