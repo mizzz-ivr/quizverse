@@ -30,7 +30,9 @@ ISSUE-0038で管理APIをDBロールベースのRBACへ移行したが、管理�
 
 対象行だけをロックして件数を数える方式では、2人の管理者が同時に相互降格・停止した場合、両トランザクションが変更前の件数を参照する可能性がある。
 
-PostgreSQLでは、role/status変更の冒頭で全管理者変更に共通する`pg_advisory_xact_lock`を取得する。対象行の`FOR UPDATE`とactive admin数確認は、その共有ロック取得後に実行する。ロックはcommit/rollbackまで保持されるため、後続操作は先行変更の確定後に最新件数を確認する。
+PostgreSQLでは、role/status変更の冒頭で全管理者変更に共通する`pg_advisory_xact_lock`を取得する。共有ロック取得後、操作元管理者を`FOR UPDATE`で再読込し、現在も`active/admin`であることを再検証する。その後に対象行の`FOR UPDATE`とactive admin数確認を行う。
+
+ロックはcommit/rollbackまで保持されるため、後続操作は先行変更の確定後に最新の操作元権限とactive admin数を確認する。これにより、相互降格・停止だけでなく、共有ロック待機中に操作元が別トランザクションで降格・停止された場合のTOCTOUも防止する。
 
 SQLiteはテスト専用であり、DBレベルのwrite serializationを利用する。
 
@@ -86,7 +88,7 @@ Flask-JWT-Extendedの追加検証コールバックで、数値ユーザーIDを
 
 ## テスト結果
 
-- バックエンド: 103件成功
+- バックエンド: 104件成功
 - フロントエンド: 54件成功、失敗0件
 - Production Build: 成功
   - JavaScript: 287.43 kB（gzip 78.29 kB）
@@ -100,6 +102,7 @@ Flask-JWT-Extendedの追加検証コールバックで、数値ユーザーIDを
 - role/status更新
 - 自己変更拒否
 - active admin変更の共有advisory lock
+- 共有ロック取得後の操作元role/status再検証
 - audit_logsのbefore/afterとSQLite互換ID
 - 不正値400
 - 停止ユーザーのlogin/OTP/access JWT/refresh拒否
