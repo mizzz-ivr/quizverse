@@ -62,13 +62,15 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 
 ### 初期管理者の設定
 
-管理者RBACの初回セットアップ時は、管理者にする既存または新規ユーザーのメールアドレスを設定します。
+管理者RBACの初回セットアップ時は、管理者にするユーザーのメールアドレスを設定します。
 
 ```env
 ADMIN_BOOTSTRAP_EMAILS=admin@example.com
 ```
 
-対象ユーザーが通常ログイン後に`/admin`へアクセスすると、DB上の`users.role`が`admin`へ昇格して保存されます。昇格確認後は、必要に応じてこの環境変数を空へ戻して再デプロイしてください。環境変数を削除しても保存済みロールは自動降格しません。
+メールアドレスを入力しただけのパスワード登録は所有確認にならないため、設定値に一致しても管理者へ昇格しません。対象ユーザーは、Google ID tokenの`email_verified`確認を通過した同一メールアドレスのGoogle OAuthアカウントでログインしたうえで`/admin`へアクセスしてください。条件を満たすとDB上の`users.role`が`admin`へ昇格して保存されます。
+
+昇格確認後は、必要に応じて`ADMIN_BOOTSTRAP_EMAILS`を空へ戻して再デプロイしてください。環境変数を削除しても保存済みロールは自動降格しません。Google OAuthを使わない環境では、運用担当者が対象ユーザーの本人確認を行ったうえで、DB上の`users.role`を明示的に`admin`へ変更します。
 
 ### デプロイ後の確認
 - `/`
@@ -185,6 +187,7 @@ npm --prefix frontend run build
 - `suspended` / `withdrawn`: 403
 - `active`かつ`admin`: 利用可能
 - 認可時はJWT claimだけでなくDB上の現在ロールと状態を確認
+- 初期管理者の自動昇格は、設定メールと一致する確認済みGoogle OAuth連携を必須とする
 - 管理画面はHttpOnly Cookie認証を利用
 - SMTP設定更新などの状態変更はCSRF二重送信で保護
 - ユーザー一覧はメールアドレスをマスクし、パスワードハッシュを返さない
