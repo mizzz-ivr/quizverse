@@ -2,6 +2,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { App } from './App'
+import { AdminApp } from './AdminApp'
 import { CreateQuizApp } from './public/CreateQuizApp'
 import { EditQuizApp } from './public/EditQuizApp'
 import { MyQuizzesApp } from './public/MyQuizzesApp'
@@ -39,7 +40,8 @@ function PublicQuizRoot() {
 
 const pathname = window.location.pathname
 let RootApp = PublicQuizRoot
-if (pathname === '/status' || pathname.startsWith('/admin')) RootApp = App
+if (pathname === '/status') RootApp = App
+if (pathname.startsWith('/admin')) RootApp = AdminApp
 if (pathname === '/quizzes/new') RootApp = CreateQuizApp
 if (pathname === '/my/quizzes') RootApp = MyQuizzesApp
 if (/^\/my\/quizzes\/\d+\/edit$/.test(pathname)) RootApp = EditQuizApp

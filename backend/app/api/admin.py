@@ -1,8 +1,9 @@
 from email.utils import parseaddr
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 from sqlalchemy import func
 
+from ..authz import admin_required
 from ..extensions import db
 from ..models import EmailSettings, PlayStatus, Quiz, QuizPlay, User
 
@@ -13,26 +14,8 @@ DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 50
 
 
-TRUTHY_VALUES = {"1", "true", "yes", "on"}
-
-
 def _error_response(code: str, message: str, status_code: int):
     return jsonify({"error": {"code": code, "message": message}}), status_code
-
-
-def _is_provisional_admin() -> bool:
-    admin_mode = request.headers.get("X-Admin-Mode", "")
-    return admin_mode.strip().lower() in TRUTHY_VALUES
-
-
-def _require_provisional_admin():
-    if _is_provisional_admin():
-        return None
-    return _error_response(
-        "admin/forbidden",
-        "Admin role is required. Provisional check expects X-Admin-Mode=true.",
-        403,
-    )
 
 
 def _validate_pagination(query_params):
@@ -53,7 +36,11 @@ def _validate_pagination(query_params):
         return None, _error_response("admin/validation_error", "per_page must be an integer.", 400)
 
     if per_page < 1 or per_page > MAX_PER_PAGE:
-        return None, _error_response("admin/validation_error", f"per_page must be between 1 and {MAX_PER_PAGE}.", 400)
+        return None, _error_response(
+            "admin/validation_error",
+            f"per_page must be between 1 and {MAX_PER_PAGE}.",
+            400,
+        )
 
     return {"page": page, "per_page": per_page}, None
 
@@ -106,13 +93,34 @@ def _validate_email_settings_payload(payload):
     return None
 
 
+@admin_bp.get("/session")
+@admin_required
+def get_admin_session():
+    user = g.current_user
+    return jsonify(
+        {
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "display_name": user.display_name,
+                "status": user.status.value,
+                "role": user.role.value,
+            }
+        }
+    )
+
+
 @admin_bp.get("/overview")
+@admin_required
 def get_admin_overview():
     user_count = int(db.session.query(func.count(User.id)).scalar() or 0)
     quiz_count = int(db.session.query(func.count(Quiz.id)).scalar() or 0)
     play_count = int(db.session.query(func.count(QuizPlay.id)).scalar() or 0)
     submitted_play_count = int(
-        db.session.query(func.count(QuizPlay.id)).filter(QuizPlay.status == PlayStatus.submitted).scalar() or 0
+        db.session.query(func.count(QuizPlay.id))
+        .filter(QuizPlay.status == PlayStatus.submitted)
+        .scalar()
+        or 0
     )
 
     health_check = {"status": "ok", "latency_ms": 20}
@@ -140,14 +148,15 @@ def get_admin_overview():
                 },
             },
             "permission": {
-                "mode": "provisional",
-                "note": "admin判定はフロントエンドの仮導線。RBACは次Issueで設計予定",
+                "mode": "rbac",
+                "role": g.current_user.role.value,
             },
         }
     )
 
 
 @admin_bp.get("/users")
+@admin_required
 def get_admin_users():
     validated, validation_error = _validate_pagination(request.args)
     if validation_error:
@@ -158,7 +167,12 @@ def get_admin_users():
     offset = (page - 1) * per_page
 
     total = int(db.session.query(func.count(User.id)).scalar() or 0)
-    users = User.query.order_by(User.created_at.desc(), User.id.desc()).offset(offset).limit(per_page).all()
+    users = (
+        User.query.order_by(User.created_at.desc(), User.id.desc())
+        .offset(offset)
+        .limit(per_page)
+        .all()
+    )
 
     items = [
         {
@@ -166,6 +180,7 @@ def get_admin_users():
             "display_name": user.display_name,
             "email_masked": _mask_email(user.email),
             "status": user.status.value,
+            "role": user.role.value,
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         }
@@ -176,6 +191,7 @@ def get_admin_users():
 
 
 @admin_bp.get("/quizzes")
+@admin_required
 def get_admin_quizzes():
     validated, validation_error = _validate_pagination(request.args)
     if validation_error:
@@ -192,7 +208,12 @@ def get_admin_quizzes():
         .group_by(Quiz.id, User.display_name)
     )
     total = int(db.session.query(func.count(Quiz.id)).scalar() or 0)
-    rows = base_query.order_by(Quiz.created_at.desc(), Quiz.id.desc()).offset(offset).limit(per_page).all()
+    rows = (
+        base_query.order_by(Quiz.created_at.desc(), Quiz.id.desc())
+        .offset(offset)
+        .limit(per_page)
+        .all()
+    )
 
     items = [
         {
@@ -211,11 +232,8 @@ def get_admin_quizzes():
 
 
 @admin_bp.get("/email-settings")
+@admin_required
 def get_email_settings():
-    permission_error = _require_provisional_admin()
-    if permission_error:
-        return permission_error
-
     settings = EmailSettings.query.order_by(EmailSettings.id.asc()).first()
     if not settings:
         return jsonify(
@@ -232,7 +250,7 @@ def get_email_settings():
                     "has_smtp_password": False,
                 },
                 "meta": {
-                    "provisional_admin": True,
+                    "permission": "rbac",
                     "password_policy": "smtp_password is accepted only on update and never returned as plain text.",
                 },
             }
@@ -253,7 +271,7 @@ def get_email_settings():
                 "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
             },
             "meta": {
-                "provisional_admin": True,
+                "permission": "rbac",
                 "password_policy": "smtp_password is accepted only on update and never returned as plain text.",
             },
         }
@@ -261,12 +279,12 @@ def get_email_settings():
 
 
 @admin_bp.put("/email-settings")
+@admin_required
 def put_email_settings():
-    permission_error = _require_provisional_admin()
-    if permission_error:
-        return permission_error
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _error_response("admin/validation_error", "JSON object is required.", 400)
 
-    payload = request.get_json(silent=True) or {}
     validation_error = _validate_email_settings_payload(payload)
     if validation_error:
         return _error_response("admin/validation_error", validation_error, 400)
@@ -306,7 +324,7 @@ def put_email_settings():
             },
             "meta": {
                 "password_updated": isinstance(smtp_password, str) and bool(smtp_password.strip()),
-                "provisional_admin": True,
+                "permission": "rbac",
             },
         }
     )
