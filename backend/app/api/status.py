@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify
 
+from ..authz import admin_required
 from ..extensions import db
 from ..models import EmailSettings
 
@@ -101,31 +102,12 @@ def _compose_status_payload(include_internal: bool = False):
     return payload
 
 
-def _require_provisional_admin():
-    admin_mode = request.headers.get("X-Admin-Mode", "")
-    if admin_mode.strip().lower() in TRUTHY_VALUES:
-        return None
-    return (
-        jsonify(
-            {
-                "error": {
-                    "code": "admin/forbidden",
-                    "message": "Admin role is required. Provisional check expects X-Admin-Mode=true.",
-                }
-            }
-        ),
-        403,
-    )
-
-
 @status_bp.get("/status")
 def get_public_status():
     return jsonify(_compose_status_payload(include_internal=False)), 200
 
 
 @status_bp.get("/admin/status")
+@admin_required
 def get_admin_status():
-    permission_error = _require_provisional_admin()
-    if permission_error:
-        return permission_error
     return jsonify(_compose_status_payload(include_internal=True)), 200
