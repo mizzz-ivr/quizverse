@@ -1,5 +1,6 @@
 from app import create_app
 from app.extensions import db
+from app.models import User, UserRole
 
 
 class TestConfig:
@@ -22,7 +23,7 @@ def _create_client(config=TestConfig):
     app = create_app(config)
     with app.app_context():
         db.create_all()
-    return app.test_client()
+    return app, app.test_client()
 
 
 def _register(client, email):
@@ -38,7 +39,7 @@ def _headers(token):
 
 
 def test_status_endpoint_returns_components_and_overall():
-    client = _create_client()
+    _app, client = _create_client()
     response = client.get('/api/status')
     assert response.status_code == 200
 
@@ -48,14 +49,14 @@ def test_status_endpoint_returns_components_and_overall():
 
 
 def test_status_endpoint_maintenance_mode():
-    client = _create_client(MaintenanceConfig)
+    _app, client = _create_client(MaintenanceConfig)
     response = client.get('/api/status')
     assert response.status_code == 200
     assert response.get_json()['status']['overall'] == 'maintenance'
 
 
 def test_admin_status_requires_authenticated_admin():
-    client = _create_client()
+    _app, client = _create_client()
     assert client.get('/api/admin/status').status_code == 401
 
     member = _register(client, 'member@example.com')
@@ -68,8 +69,12 @@ def test_admin_status_requires_authenticated_admin():
 
 
 def test_admin_status_returns_internal_field_for_admin():
-    client = _create_client()
+    app, client = _create_client()
     admin = _register(client, 'root@example.com')
+    with app.app_context():
+        user = User.query.filter_by(email='root@example.com').one()
+        user.role = UserRole.admin
+        db.session.commit()
 
     response = client.get('/api/admin/status', headers=_headers(admin))
     assert response.status_code == 200
