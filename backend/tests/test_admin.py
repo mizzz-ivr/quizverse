@@ -1,6 +1,6 @@
 from app import create_app
 from app.extensions import db
-from app.models import User, UserRole, UserStatus
+from app.models import OauthProvider, User, UserOauthAccount, UserRole, UserStatus
 
 
 class TestConfig:
@@ -32,8 +32,24 @@ def _headers(token, **extra):
     return {"Authorization": f"Bearer {token}", **extra}
 
 
-def _admin_token(client):
+def _link_verified_google_email(app, email):
+    with app.app_context():
+        user = User.query.filter_by(email=email).one()
+        db.session.add(
+            UserOauthAccount(
+                id=1,
+                user_id=user.id,
+                provider=OauthProvider.google,
+                provider_user_id=f"google-{user.id}",
+                provider_email=user.email,
+            )
+        )
+        db.session.commit()
+
+
+def _admin_token(app, client):
     token = _register(client, "root@example.com")
+    _link_verified_google_email(app, "root@example.com")
     assert client.get("/api/admin/session", headers=_headers(token)).status_code == 200
     return token
 
@@ -51,9 +67,20 @@ def test_admin_endpoints_require_authenticated_admin():
     assert forbidden.get_json()["error"]["code"] == "admin/forbidden"
 
 
-def test_bootstrap_email_is_persisted_as_admin():
+def test_unverified_password_account_cannot_claim_bootstrap_admin():
     app, client = _client()
-    token = _admin_token(client)
+    token = _register(client, "root@example.com")
+
+    response = client.get("/api/admin/session", headers=_headers(token))
+
+    assert response.status_code == 403
+    with app.app_context():
+        assert User.query.filter_by(email="root@example.com").one().role == UserRole.user
+
+
+def test_verified_google_email_is_persisted_as_admin():
+    app, client = _client()
+    token = _admin_token(app, client)
 
     response = client.get("/api/admin/session", headers=_headers(token))
     assert response.get_json()["user"]["role"] == "admin"
@@ -63,7 +90,7 @@ def test_bootstrap_email_is_persisted_as_admin():
 
 def test_inactive_admin_is_rejected():
     app, client = _client()
-    token = _admin_token(client)
+    token = _admin_token(app, client)
     with app.app_context():
         user = User.query.filter_by(email="root@example.com").one()
         user.status = UserStatus.suspended
@@ -75,8 +102,8 @@ def test_inactive_admin_is_rejected():
 
 
 def test_admin_overview_users_and_pagination():
-    _app, client = _client()
-    admin = _admin_token(client)
+    app, client = _client()
+    admin = _admin_token(app, client)
     _register(client, "member@example.com")
 
     overview = client.get("/api/admin/overview", headers=_headers(admin))
@@ -102,8 +129,8 @@ def test_admin_overview_users_and_pagination():
 
 
 def test_admin_email_settings_are_rbac_protected_and_masked():
-    _app, client = _client()
-    headers = _headers(_admin_token(client))
+    app, client = _client()
+    headers = _headers(_admin_token(app, client))
     payload = {
         "sender_name": "QuizVerse",
         "sender_email": "notify@example.com",
