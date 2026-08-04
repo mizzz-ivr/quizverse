@@ -20,6 +20,8 @@
 
 Alembic revisionは`20260804_0009`、親revisionは`20260422_0008`とする。既存ユーザーと新規ユーザーにはDB既定値`user`を適用する。
 
+PostgreSQLでは`user_role` enumを`checkfirst=True`で作成し、列追加時は`create_type=False`を使って型の二重作成を防ぐ。SQLiteではDB既定値を保持することで、未対応の`ALTER COLUMN`を実行しない。
+
 ## 初期管理者
 
 `ADMIN_BOOTSTRAP_EMAILS`へカンマ区切りでメールアドレスを設定する。
@@ -28,7 +30,14 @@ Alembic revisionは`20260804_0009`、親revisionは`20260422_0008`とする。�
 ADMIN_BOOTSTRAP_EMAILS=admin@example.com
 ```
 
-設定されたメールアドレスのログイン済みユーザーが管理APIへアクセスした際、DB上のロールを`admin`へ昇格して保存する。設定値に含まれないユーザーは昇格しない。環境変数を削除しても、保存済みロールは自動降格しない。
+メールアドレスを入力するだけのパスワード登録は所有確認にならないため、設定値への一致だけでは昇格しない。Google ID tokenの`email_verified`検証後に作成された`user_oauth_accounts`が、同一メールアドレスで紐づいているユーザーだけを`admin`へ昇格して保存する。
+
+- 未確認のパスワード登録アカウント: 昇格しない
+- 確認済みGoogle OAuthアカウント: 設定メールと一致した場合だけ昇格
+- 設定値に含まれないアカウント: 昇格しない
+- 環境変数削除後: 保存済みロールを自動降格しない
+
+Google OAuthを利用しない環境では、DB管理者が対象ユーザーを確認したうえで`users.role=admin`を明示設定する。
 
 ## 認可
 
@@ -37,7 +46,7 @@ ADMIN_BOOTSTRAP_EMAILS=admin@example.com
 1. access JWTをCookieまたはAuthorizationヘッダーから検証
 2. JWT identityに対応するユーザーをDBから取得
 3. `status=active`を確認
-4. 初期管理者設定を確認
+4. 確認済みGoogleメールと初期管理者設定を確認
 5. `role=admin`を確認
 
 応答境界:
@@ -84,14 +93,19 @@ ADMIN_BOOTSTRAP_EMAILS=admin@example.com
   - CSS: 42.93 kB（gzip 7.33 kB）
   - build: 1.48秒
 
+レビュー対応で、未確認パスワードアカウントの昇格拒否、確認済みGoogleメールの昇格、PostgreSQL enum型の二重作成防止、SQLite互換性、スキーマ文書を追加検証した。
+
 ## マージ後作業
 
-1. Preview / Productionへ`ADMIN_BOOTSTRAP_EMAILS`を設定
-2. DBバックアップを確認
-3. `flask --app app db upgrade`でrevision `20260804_0009`を適用
-4. 対象メールアドレスで通常ログイン
-5. `/admin`へアクセスし、`/api/admin/session`が`role=admin`を返すことを確認
-6. 初回昇格後、必要に応じて`ADMIN_BOOTSTRAP_EMAILS`を空へ戻して再デプロイ
+1. DBバックアップを確認
+2. `flask --app app db upgrade`でrevision `20260804_0009`を適用
+3. Google OAuthでメール所有確認済みの対象ユーザーを用意
+4. Preview / Productionへ`ADMIN_BOOTSTRAP_EMAILS`を設定して再デプロイ
+5. 対象ユーザーがGoogleログイン後、`/admin`へアクセス
+6. `/api/admin/session`が`role=admin`を返すことを確認
+7. 初回昇格後、必要に応じて`ADMIN_BOOTSTRAP_EMAILS`を空へ戻して再デプロイ
+
+Google OAuthを使わない場合は、手順3〜7の代わりにDB上で確認済み対象ユーザーの`role`を明示的に`admin`へ変更する。
 
 ## 対象外
 
