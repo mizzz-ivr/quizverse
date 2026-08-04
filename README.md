@@ -51,6 +51,7 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 - `JWT_TOKEN_LOCATION`
 - `JWT_COOKIE_SAMESITE`
 - `JWT_COOKIE_DOMAIN`
+- `ADMIN_BOOTSTRAP_EMAILS`
 - `GOOGLE_OAUTH_CLIENT_ID`
 - `EMAIL_SETTINGS_ENCRYPTION_KEY`
 - `SERVICE_MAINTENANCE_MODE`
@@ -58,6 +59,16 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 - `SERVICE_MAINTENANCE_MESSAGE`
 - `SERVICE_MAINTENANCE_SCHEDULED_UNTIL`
 - OTP 関連設定（有効期限・再送間隔・試行上限）
+
+### 初期管理者の設定
+
+管理者RBACの初回セットアップ時は、管理者にする既存または新規ユーザーのメールアドレスを設定します。
+
+```env
+ADMIN_BOOTSTRAP_EMAILS=admin@example.com
+```
+
+対象ユーザーが通常ログイン後に`/admin`へアクセスすると、DB上の`users.role`が`admin`へ昇格して保存されます。昇格確認後は、必要に応じてこの環境変数を空へ戻して再デプロイしてください。環境変数を削除しても保存済みロールは自動降格しません。
 
 ### デプロイ後の確認
 - `/`
@@ -71,6 +82,7 @@ QuizVerse は単一の Vercel プロジェクトで frontend と backend を配�
 - `/api/status`
 - `/status`
 - `/admin`
+- `/api/admin/session`
 
 ### DBマイグレーション
 Vercel Function 起動時には自動マイグレーションを実行しません。外部 PostgreSQL のバックアップと対象リビジョンを確認したうえで、明示的に実行してください。
@@ -79,6 +91,8 @@ Vercel Function 起動時には自動マイグレーションを実行しませ�
 cd backend
 DATABASE_URL='<production database url>' flask --app app db upgrade
 ```
+
+管理者RBACではrevision `20260804_0009`で`users.role`を追加します。新しいアプリを配信する前に、対象DBへこのmigrationを適用してください。
 
 ## DBマイグレーション
 ```bash
@@ -162,7 +176,30 @@ npm --prefix frontend run build
 
 `quizverse_session_hint`はJWTを含まないセッション候補のヒントです。認証済みかどうかの最終確認は`GET /api/auth/me`で行います。CLI・既存APIクライアント向けのAuthorizationヘッダーJWT互換は残しますが、一般ユーザー向けWeb画面からは送信しません。
 
-## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030, ISSUE-0032, ISSUE-0034）
+## 管理者RBAC（ISSUE-0038）
+
+管理画面と管理APIは、DB上の`users.role=admin`で保護します。ブラウザの`localStorage`や`X-Admin-Mode`は管理者判定に使用しません。
+
+- 未認証: 401
+- 一般ユーザー: 403
+- `suspended` / `withdrawn`: 403
+- `active`かつ`admin`: 利用可能
+- 認可時はJWT claimだけでなくDB上の現在ロールと状態を確認
+- 管理画面はHttpOnly Cookie認証を利用
+- SMTP設定更新などの状態変更はCSRF二重送信で保護
+- ユーザー一覧はメールアドレスをマスクし、パスワードハッシュを返さない
+
+管理API:
+
+- `GET /api/admin/session`: 現在の管理者セッションを確認
+- `GET /api/admin/overview`: 管理ダッシュボード集計
+- `GET /api/admin/users`: ユーザー一覧
+- `GET /api/admin/quizzes`: クイズ一覧
+- `GET /api/admin/email-settings`: SMTP設定取得
+- `PUT /api/admin/email-settings`: SMTP設定更新
+- `GET /api/admin/status`: 内部サービスステータス
+
+## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030, ISSUE-0032, ISSUE-0034, ISSUE-0038）
 - JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `JWT_REFRESH_TOKEN_EXPIRES_SECONDS`, `JWT_COOKIE_SECURE`）。
 - ブラウザはHttpOnly Cookie認証、状態変更APIはCSRF二重送信を利用します。
 - OTP設定は環境変数で管理します（例: `OTP_EXPIRES_SECONDS`, `OTP_MIN_RESEND_SECONDS`, `OTP_MAX_REQUESTS_PER_HOUR`, `OTP_MAX_VERIFY_ATTEMPTS`）。
@@ -179,13 +216,14 @@ npm --prefix frontend run build
   - `GET /api/me/quizzes/{quiz_id}`: JWT必須。本人所有かつ編集可能な下書きを正答情報付きで取得
   - `PUT /api/me/quizzes/{quiz_id}`: JWT必須。本人所有・プレイ履歴なしの下書き内容を一括更新
   - `PATCH /api/me/quizzes/{quiz_id}/status`: JWT必須。本人所有クイズの `draft / published / archived` を変更
-  - `GET /api/admin/overview`: 管理ダッシュボード向けサマリー（ユーザー数 / クイズ数 / プレイ数 / サービス状況）
-  - `GET /api/admin/users`: 管理向けユーザー一覧（emailはマスクした値のみ返却）
-  - `GET /api/admin/quizzes`: 管理向けクイズ一覧（作成者・ステータス・プレイ数）
-  - `GET /api/admin/email-settings`: 管理向けメール設定取得（機密値はマスクのみ返却、`X-Admin-Mode: true` が必要）
-  - `PUT /api/admin/email-settings`: 管理向けメール設定保存（SMTPパスワードは更新時のみ受け取り）
-  - `GET /api/status`: 一般公開向けサービスステータス（アプリ/API/DB/認証/メール/メンテナンス）
-  - `GET /api/admin/status`: 管理向け詳細ステータス（仮置き管理判定: `X-Admin-Mode: true`）
+  - `GET /api/admin/session`: adminロール必須。管理者セッションを返却
+  - `GET /api/admin/overview`: adminロール必須。管理ダッシュボード向けサマリー
+  - `GET /api/admin/users`: adminロール必須。メールをマスクしたユーザー一覧
+  - `GET /api/admin/quizzes`: adminロール必須。作成者・ステータス・プレイ数を含むクイズ一覧
+  - `GET /api/admin/email-settings`: adminロール必須。機密値をマスクしたメール設定取得
+  - `PUT /api/admin/email-settings`: adminロール必須。SMTPパスワードを更新時のみ受け取り
+  - `GET /api/status`: 一般公開向けサービスステータス
+  - `GET /api/admin/status`: adminロール必須。管理向け詳細ステータス
   - `POST /api/auth/register`: メールアドレス・パスワードで新規登録し、access / refresh Cookieを発行
   - `POST /api/auth/login`: メールアドレス・パスワードを検証し、access / refresh Cookieを発行
   - `POST /api/auth/google`: Google ID token を検証し、access / refresh Cookieを発行
@@ -226,6 +264,8 @@ npm --prefix frontend run build
 - Issue: `docs/issues/ISSUE-0030.md`
 - Issue: `docs/issues/ISSUE-0032.md`
 - Issue: `docs/issues/ISSUE-0034.md`
+- Issue: `docs/issues/ISSUE-0036.md`
+- Issue: `docs/issues/ISSUE-0038.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -249,20 +289,23 @@ npm --prefix frontend run build
 - Qiita下書き: `docs/qiita/ISSUE-0030_cookie_auth_session.md`
 - Qiita下書き: `docs/qiita/ISSUE-0032_cross_tab_auth_lock.md`
 - Qiita下書き: `docs/qiita/ISSUE-0034_sqlalchemy2_legacy_api_cleanup.md`
+- Qiita下書き: `docs/qiita/ISSUE-0036_github_actions_node24_runtime.md`
+- Qiita下書き: `docs/qiita/ISSUE-0038_admin_rbac_foundation.md`
 
-## フロントエンド（管理ダッシュボード / ISSUE-0014）
-- `/admin` 配下に管理ダッシュボード基盤を追加しました。
-- 仮置きの admin 判定として `localStorage["quizverse_is_admin"]` を利用します。
-- 初回アクセス時は一般ユーザー扱いのため、画面内トグルで管理者モードへ切り替えて確認してください。
-- MVPとして、ローディング（skeleton）/ 空状態 / エラー状態を基本実装しています。
+## フロントエンド（管理ダッシュボード / ISSUE-0014, ISSUE-0038）
+- `/admin`配下は専用`AdminApp`で表示します。
+- 起動時に`GET /api/admin/session`でサーバー側の実ロールを確認します。
+- 一般ユーザーには403の権限不足画面、未ログインユーザーにはログイン導線を表示します。
+- 管理APIはHttpOnly Cookieを利用し、状態変更時はCSRFヘッダーを送信します。
+- ブラウザから切り替え可能な管理者モードと`X-Admin-Mode`は使用しません。
 
 ## フロントエンド（サービス状況表示 / ISSUE-0016）
 - 公開向けステータスページを `/status` として実装。
 - ステータスカードで `正常 / 注意 / 障害 / メンテナンス中` を色分け表示。
 - skeleton loading / 空状態 / エラー状態 / 更新時刻表示を実装。
 
-## フロントエンド（メール設定 / ISSUE-0015）
+## フロントエンド（メール設定 / ISSUE-0015, ISSUE-0038）
 - 管理画面のメール設定ルートを `/admin/settings/email` として実装。
-- SMTP設定は管理APIと連携し、ローディング・保存成功・エラー表示を行う。
-- SMTPパスワードは取得時に平文を返さず、変更時のみ送信する。
-- 管理APIの権限判定は **仮置き** として `X-Admin-Mode: true` を利用。
+- SMTP設定はadminロール必須の管理APIと連携します。
+- SMTPパスワードは取得時に平文を返さず、変更時のみ送信します。
+- 保存操作はHttpOnly Cookie認証とCSRF二重送信で保護します。
