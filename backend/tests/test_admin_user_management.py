@@ -1,10 +1,15 @@
 from datetime import timedelta
+from pathlib import Path
 
 from flask_jwt_extended import create_access_token
 
 from app import create_app
 from app.extensions import db
 from app.models import AuditLog, User, UserRole, UserStatus
+
+
+ROOT = Path(__file__).resolve().parents[2]
+ADMIN_USER_MANAGEMENT = ROOT / "backend" / "app" / "api" / "admin_user_management.py"
 
 
 class TestConfig:
@@ -185,6 +190,39 @@ def test_status_change_is_audited_and_invalid_values_are_rejected():
             "after": "suspended",
             "actor_role": "admin",
         }
+
+
+def test_multiple_audit_logs_receive_distinct_ids_in_sqlite_compatibility_schema():
+    app, client = _create_client()
+    _add_user(app, 1, "admin@example.com", role=UserRole.admin)
+    _add_user(app, 2, "member-a@example.com")
+    _add_user(app, 3, "member-b@example.com")
+
+    promoted = client.patch(
+        "/api/admin/users/2/role",
+        headers=_headers(app, 1),
+        json={"role": "admin"},
+    )
+    suspended = client.patch(
+        "/api/admin/users/3/status",
+        headers=_headers(app, 1),
+        json={"status": "suspended"},
+    )
+
+    assert promoted.status_code == 200
+    assert suspended.status_code == 200
+    with app.app_context():
+        assert [log.id for log in AuditLog.query.order_by(AuditLog.id).all()] == [1, 2]
+
+
+def test_postgresql_admin_mutations_use_shared_transaction_advisory_lock():
+    source = ADMIN_USER_MANAGEMENT.read_text(encoding="utf-8")
+
+    assert "pg_advisory_xact_lock" in source
+    assert "_ADMIN_MUTATION_LOCK_KEY" in source
+    assert source.count("_serialize_admin_mutation()") == 3
+    assert 'dialect.name == "postgresql"' in source
+    assert "id=_audit_log_id_for_current_dialect()" in source
 
 
 def test_suspended_user_is_rejected_by_login_otp_and_existing_bearer_token():
