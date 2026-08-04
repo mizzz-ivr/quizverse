@@ -52,12 +52,25 @@ def serialize_admin_mutation():
 処理順は次のとおりです。
 
 1. 共通advisory lockを取得
-2. 対象ユーザー行を`FOR UPDATE`で取得
-3. active admin数を確認
-4. role/statusと監査ログを更新
-5. commitまたはrollbackでロック解放
+2. 操作元管理者を`FOR UPDATE`で再読込し、現在も`active/admin`か確認
+3. 対象ユーザー行を`FOR UPDATE`で取得
+4. active admin数を確認
+5. role/statusと監査ログを更新
+6. commitまたはrollbackでロック解放
 
 後続トランザクションは先行変更の確定後に件数を確認するため、相互降格や相互停止でもactive adminが0人になることを防げます。
+
+また、最初の`admin_required`判定後に共有ロック待ちが発生し、その間に操作元が別トランザクションで降格・停止される可能性があります。共有ロック取得後に操作元を再読込することで、このtime-of-check/time-of-useの差も閉じます。
+
+```python
+def revalidate_actor_after_lock():
+    actor = g.current_user
+    db.session.refresh(actor, with_for_update=True)
+    if actor.status != UserStatus.active:
+        return account_inactive_error()
+    if actor.role != UserRole.admin:
+        return admin_forbidden_error()
+```
 
 ## 4. 変更を監査ログへ残す
 
@@ -131,7 +144,7 @@ PATCHリクエストは既存のHttpOnly Cookie認証を使い、JavaScriptか�
 
 ## CI結果
 
-- バックエンド: 103件成功
+- バックエンド: 104件成功
 - フロントエンド: 54件成功、失敗0件
 - Production Build: 成功
 - JavaScript: 287.43 kB（gzip 78.29 kB）
@@ -142,6 +155,7 @@ PATCHリクエストは既存のHttpOnly Cookie認証を使い、JavaScriptか�
 
 - クライアント表示だけでなくサーバー側で自己保護を行う
 - active admin判定を共有advisory lockで直列化する
+- 共有ロック待機後に操作元の現在権限を再検証する
 - role/status変更を監査ログへ残す
 - 監査ログIDをPostgreSQLシーケンスへ委ねる
 - JWT期限ではなくDBの現在statusを毎回確認する
