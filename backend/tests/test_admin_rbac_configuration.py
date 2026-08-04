@@ -19,6 +19,8 @@ def test_user_role_migration_follows_current_head():
     assert 'revision = "20260804_0009"' in migration
     assert 'down_revision = "20260422_0008"' in migration
     assert 'sa.Enum("user", "admin", name="user_role")' in migration
+    assert 'postgresql.ENUM(' in migration
+    assert 'create_type=False' in migration
     assert 'op.add_column(' in migration
     assert '"users"' in migration
     assert '"role"' in migration
