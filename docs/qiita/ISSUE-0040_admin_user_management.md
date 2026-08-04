@@ -32,22 +32,32 @@ if target.id == g.current_user.id and next_role != UserRole.admin:
 
 状態変更も同様に、自分自身を`active`以外へ変更できないようにします。
 
-## 3. active adminを失わない
+## 3. active adminを並行操作から守る
 
-対象ユーザーをロックしてから、active admin数を確認します。
+active admin数を数えて1人以下なら拒否するだけでは、並行実行に弱い場合があります。2人の管理者が同時に相互降格すると、それぞれが変更前の「2人」を確認して両方commitできる可能性があります。
+
+QuizVerseでは、PostgreSQLのtransaction advisory lockを全role/status変更で共有します。
 
 ```python
-active_admins = (
-    db.session.query(func.count(User.id))
-    .filter(
-        User.role == UserRole.admin,
-        User.status == UserStatus.active,
+_ADMIN_MUTATION_LOCK_KEY = 0x51565F41444D494E
+
+
+def serialize_admin_mutation():
+    db.session.execute(
+        db.text("SELECT pg_advisory_xact_lock(:lock_key)"),
+        {"lock_key": _ADMIN_MUTATION_LOCK_KEY},
     )
-    .scalar()
-)
 ```
 
-最後のactive adminを降格・停止する変更は409で拒否します。自己保護と組み合わせることで、通常の管理画面操作から管理者不在になることを防ぎます。
+処理順は次のとおりです。
+
+1. 共通advisory lockを取得
+2. 対象ユーザー行を`FOR UPDATE`で取得
+3. active admin数を確認
+4. role/statusと監査ログを更新
+5. commitまたはrollbackでロック解放
+
+後続トランザクションは先行変更の確定後に件数を確認するため、相互降格や相互停止でもactive adminが0人になることを防げます。
 
 ## 4. 変更を監査ログへ残す
 
@@ -64,6 +74,20 @@ active_admins = (
 
 操作した管理者、対象ユーザー、変更前後、時刻を追跡できます。同一値への更新は成功扱いにしつつ、監査ログを増やしません。
 
+監査ログIDを`max(id) + 1`で作ると、並行トランザクションが同じIDを選ぶ可能性があります。本番PostgreSQLではIDを指定せず、既存のBIGSERIALシーケンスへ採番を委ねます。
+
+```python
+AuditLog(
+    actor_user_id=g.current_user.id,
+    action=AuditAction.update,
+    entity_type="user",
+    entity_id=str(target.id),
+    metadata_json=metadata,
+)
+```
+
+in-memory SQLiteの既存BIGINTテストスキーマはROWID自動採番にならないため、SQLiteだけに互換用IDを設定しています。本番の採番競合には影響しません。
+
 ## 5. JWTの有効期限だけで停止を判断しない
 
 JWTが有効期限内でも、DB上のユーザーが停止済みならアクセスを拒否する必要があります。Flask-JWT-Extendedの追加検証コールバックで、JWT identityに対応するユーザーの現在statusを毎回確認します。
@@ -71,9 +95,13 @@ JWTが有効期限内でも、DB上のユーザーが停止済みならアクセ
 ```python
 @jwt.token_verification_loader
 def verify_active_user_token(_jwt_header, jwt_payload):
-    user = load_user(jwt_payload.get("sub"))
-    return bool(user and user.status == UserStatus.active)
+    user, is_user_identity = load_user(jwt_payload.get("sub"))
+    if not is_user_identity or user is None:
+        return True
+    return user.status == UserStatus.active
 ```
+
+ユーザー不存在は共通コールバックで応答を決めず、`/api/auth/me`など各APIの既存401/404契約へ処理を委ねます。実在する`suspended / withdrawn`だけを403 `auth/account_inactive`で拒否します。
 
 これにより、access JWT、refresh Cookie、クイズAPI、管理APIなど、`jwt_required`を使う経路全体へ同じ停止ルールを適用できます。
 
@@ -101,13 +129,23 @@ JWT発行前の処理には追加検証が必要です。
 
 PATCHリクエストは既存のHttpOnly Cookie認証を使い、JavaScriptから読めるCSRF Cookieを`X-CSRF-TOKEN`へ設定します。
 
+## CI結果
+
+- バックエンド: 103件成功
+- フロントエンド: 54件成功、失敗0件
+- Production Build: 成功
+- JavaScript: 287.43 kB（gzip 78.29 kB）
+- CSS: 44.33 kB（gzip 7.54 kB）
+- build: 1.53秒
+
 ## まとめ
 
 - クライアント表示だけでなくサーバー側で自己保護を行う
-- active adminが失われる変更を拒否する
+- active admin判定を共有advisory lockで直列化する
 - role/status変更を監査ログへ残す
+- 監査ログIDをPostgreSQLシーケンスへ委ねる
 - JWT期限ではなくDBの現在statusを毎回確認する
 - 停止ルールをlogin、OTP、refresh、保護APIへ一貫適用する
 - 管理画面では機密情報を返さない
 
-管理ユーザー機能は単なるCRUDではなく、復旧可能性と監査可能性を守る運用機能として設計することが重要です。
+管理ユーザー機能は単なるCRUDではなく、復旧可能性・並行実行の安全性・監査可能性を守る運用機能として設計することが重要です。
