@@ -16,6 +16,10 @@ DEFAULT_PAGE = 1
 DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 50
 MAX_SEARCH_LENGTH = 100
+# "QV_ADMIN" encoded as a signed-64-bit-safe integer. PostgreSQL transaction
+# advisory locks with this shared key serialize every role/status mutation that
+# can change the active-admin count.
+_ADMIN_MUTATION_LOCK_KEY = 0x51565F41444D494E
 
 
 def _error_response(code: str, message: str, status_code: int):
@@ -106,6 +110,22 @@ def _serialize_user(user: User):
     }
 
 
+def _serialize_admin_mutation():
+    """Serialize role/status mutations before target-row or count checks.
+
+    PostgreSQL's transaction advisory lock is held until commit/rollback. All
+    endpoints that can reduce active-admin membership acquire the same lock,
+    preventing two concurrent transactions from both observing a stale count.
+    SQLite is used only by tests and serializes writes at the database level.
+    """
+    bind = db.session.get_bind()
+    if bind.dialect.name == "postgresql":
+        db.session.execute(
+            db.text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": _ADMIN_MUTATION_LOCK_KEY},
+        )
+
+
 def _active_admin_count():
     return int(
         db.session.query(func.count(User.id))
@@ -115,7 +135,15 @@ def _active_admin_count():
     )
 
 
-def _next_audit_log_id():
+def _audit_log_id_for_current_dialect():
+    """Let PostgreSQL use audit_logs' BIGSERIAL sequence.
+
+    The in-memory SQLite test schema declares this legacy key as BIGINT, which
+    is not SQLite's implicit INTEGER ROWID alias. Supply a compatibility ID only
+    for SQLite; production PostgreSQL omits the ID and allocates it atomically.
+    """
+    if db.session.get_bind().dialect.name != "sqlite":
+        return None
     max_id = db.session.query(func.max(AuditLog.id)).scalar()
     return int(max_id or 0) + 1
 
@@ -123,7 +151,7 @@ def _next_audit_log_id():
 def _append_audit_log(target: User, field: str, before: str, after: str):
     db.session.add(
         AuditLog(
-            id=_next_audit_log_id(),
+            id=_audit_log_id_for_current_dialect(),
             actor_user_id=g.current_user.id,
             action=AuditAction.update,
             entity_type="user",
@@ -233,6 +261,7 @@ def patch_admin_user_role(user_id):
         )
 
     try:
+        _serialize_admin_mutation()
         target, error = _load_target(user_id, lock=True)
         if error:
             db.session.rollback()
@@ -288,6 +317,7 @@ def patch_admin_user_status(user_id):
         )
 
     try:
+        _serialize_admin_mutation()
         target, error = _load_target(user_id, lock=True)
         if error:
             db.session.rollback()
