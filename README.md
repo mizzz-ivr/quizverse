@@ -1,283 +1,250 @@
 # QuizVerse
-クイズ作成・プレイ・ランキングを軸としたWebプラットフォーム。
+
+クイズ作成・公開・プレイ・ランキング・学習履歴を扱うWebプラットフォームです。
 
 ## 技術スタック
-- Frontend: React + Tailwind + Vite
+
+- Frontend: React + Tailwind CSS + Vite
 - Backend: Flask + Flask-JWT-Extended + Flask-Migrate + SQLAlchemy
-- DB: PostgreSQL
-- Local Infra: Docker Compose
+- Database: PostgreSQL
+- Local: Docker Compose
 - Deployment: Vercel（Vite Static + Flask Python Function）
 
 ## クイックスタート
-1. `.env.example` をコピーして `.env` を作成
-2. 起動
-   ```bash
-   docker compose up --build
-   ```
-3. backendヘルスチェック
-   - `http://localhost:5000/api/health`
-4. frontend
-   - `http://localhost:5173`
-
-## Vercel デプロイ
-QuizVerse は単一の Vercel プロジェクトで frontend と backend を配信します。
-
-- Vite build output: `frontend/dist`
-- Flask Function entrypoint: `api/index.py`
-- `/api/*`: Flask Function へ rewrite
-- その他のパス: SPA の `index.html` へ rewrite
-- DB: 外部 PostgreSQL を `DATABASE_URL` で接続
-
-### Vercel Project Settings
-1. GitHub リポジトリ `mizzz-ivr/quizverse` を Vercel に Import
-2. Root Directory はリポジトリルートのままにする
-3. Framework Preset は `Other` または自動判定を利用
-4. `vercel.json` の install/build/output 設定を利用
-5. Preview / Production の環境変数を登録
-
-### 必須環境変数
-- `DATABASE_URL`
-- `SECRET_KEY`
-- `JWT_SECRET_KEY`
-- `JWT_COOKIE_SECURE=true`
-- `AUTH_EXPOSE_TOKEN_IN_RESPONSE=false`
-- `AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false`
-- `OTP_INCLUDE_CODE_IN_RESPONSE=false`
-- `QUIZ_PUBLICATION_ENFORCED=true`
-
-### 機能別環境変数
-- `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`
-- `JWT_REFRESH_TOKEN_EXPIRES_SECONDS`
-- `JWT_TOKEN_LOCATION`
-- `JWT_COOKIE_SAMESITE`
-- `JWT_COOKIE_DOMAIN`
-- `ADMIN_BOOTSTRAP_EMAILS`
-- `GOOGLE_OAUTH_CLIENT_ID`
-- `EMAIL_SETTINGS_ENCRYPTION_KEY`
-- `SERVICE_MAINTENANCE_MODE`
-- `SERVICE_MAINTENANCE_TITLE`
-- `SERVICE_MAINTENANCE_MESSAGE`
-- `SERVICE_MAINTENANCE_SCHEDULED_UNTIL`
-- OTP 関連設定（有効期限・再送間隔・試行上限）
-
-### 初期管理者の設定
-
-管理者RBACの初回セットアップ時は、管理者にするユーザーのメールアドレスを設定します。
-
-```env
-ADMIN_BOOTSTRAP_EMAILS=admin@example.com
-```
-
-メールアドレスを入力しただけのパスワード登録は所有確認にならないため、設定値に一致しても管理者へ昇格しません。対象ユーザーは、Google ID tokenの`email_verified`確認を通過した同一メールアドレスのGoogle OAuthアカウントでログインしたうえで`/admin`へアクセスしてください。条件を満たすとDB上の`users.role`が`admin`へ昇格して保存されます。
-
-昇格確認後は、必要に応じて`ADMIN_BOOTSTRAP_EMAILS`を空へ戻して再デプロイしてください。環境変数を削除しても保存済みロールは自動降格しません。Google OAuthを使わない環境では、運用担当者が対象ユーザーの本人確認を行ったうえで、DB上の`users.role`を明示的に`admin`へ変更します。
-
-### デプロイ後の確認
-- `/`
-- `/login`
-- `/quizzes`
-- `/quizzes/new`
-- `/my/quizzes`
-- `/my/quizzes/{quiz_id}/edit`
-- `/rankings`
-- `/api/health`
-- `/api/status`
-- `/status`
-- `/admin`
-- `/admin/users`
-- `/api/admin/session`
-
-### DBマイグレーション
-Vercel Function 起動時には自動マイグレーションを実行しません。外部 PostgreSQL のバックアップと対象リビジョンを確認したうえで、明示的に実行してください。
 
 ```bash
-cd backend
-DATABASE_URL='<production database url>' flask --app app db upgrade
+cp .env.example .env
+docker compose up --build
 ```
 
-管理者RBACではrevision `20260804_0009`で`users.role`を追加します。新しいアプリを配信する前に、対象DBへこのmigrationを適用してください。ISSUE-0040は既存の`users.role/status`と`audit_logs`を利用するため追加migrationはありません。
+- Frontend: `http://localhost:5173`
+- Backend health: `http://localhost:5000/api/health`
+
+## テスト
+
+```bash
+cd backend && PYTHONPATH=. pytest
+npm --prefix frontend test
+npm --prefix frontend run build
+```
+
+`backend/pytest.ini`ではSQLAlchemy Legacy API警告をエラーとして扱います。
+
+## 一般ユーザー向け画面
+
+- `/`: ホーム
+- `/signup`: 新規登録
+- `/login`: ログイン
+- `/quizzes`: 公開クイズ一覧・検索・カテゴリ絞り込み
+- `/quizzes/{quiz_id}`: クイズ詳細・回答・採点結果
+- `/quizzes/{quiz_id}/rankings`: クイズ別ランキング
+- `/rankings`: 総合ランキング
+- `/quizzes/new`: クイズ作成
+- `/my/quizzes`: 自分のクイズ管理
+- `/my/quizzes/{quiz_id}/edit`: 下書き編集
+- `/profile`: プロフィール・成績・プレイ履歴
+- `/status`: 公開サービス状況
+
+## プロフィール・プレイ履歴（ISSUE-0042）
+
+`/profile`では、認証済みユーザーが次を確認できます。
+
+- 表示名・メールアドレス・登録日・最終ログイン
+- 表示名編集
+- 平均正答率
+- プレイ回数
+- 挑戦したクイズ数
+- 累計正解数
+- 全問正解回数
+- 作成クイズ数
+- 提出済みプレイ履歴
+- 問題ごとの選択内容・正誤・獲得点
+
+履歴は次の区分で絞り込めます。
+
+- `perfect`: 正答率100%
+- `passed`: 70%以上100%未満
+- `review`: 70%未満
+
+非公開・アーカイブ済みクイズの過去結果も本人には表示します。再挑戦導線は現在`published`のクイズだけ有効です。
+
+公開中クイズでは、空回答や弱い提出から正答キーを収集できないよう、全問正解ではないプレイの正解選択肢と解説をロックします。完全な正答キーと解説は、全問正解した場合、またはクイズが`draft / archived`となり再挑戦できない場合だけ返します。
+
+プロフィールAPI:
+
+- `GET /api/me/profile`
+- `PATCH /api/me/profile`
+- `GET /api/me/plays`
+- `GET /api/me/plays/{play_id}`
+
+すべてJWT/Cookie認証必須です。他ユーザーの履歴は404として扱います。
+
+詳細仕様: `docs/issues/ISSUE-0042.md`
+
+## クイズ公開ライフサイクル
+
+- `draft`: 作成者だけがプレビュー可能
+- `published`: 一般一覧・詳細・回答・ランキング対象
+- `archived`: 公開終了。作成者だけがプレビュー・再公開可能
+
+非公開クイズへ非作成者がアクセスした場合は404を返します。本番では`QUIZ_PUBLICATION_ENFORCED=true`を設定してください。
+
+下書き編集は、作成者本人かつプレイ履歴が存在しないクイズだけに限定しています。一度でもプレイ履歴が保存されたクイズは、採点結果との整合性を守るため問題構造を編集できません。
+
+## ブラウザ認証
+
+一般ユーザー向けWeb画面はHttpOnly Cookie認証を使用します。
+
+- access token: 短命Cookie
+- refresh token: `/api/auth/refresh`専用Cookie
+- CSRF: CSRF Cookieを`X-CSRF-TOKEN`へ設定
+- API通信: `credentials: same-origin`
+- access token期限切れ: refresh後に元リクエストを1回再試行
+- 複数タブ: Web Locks APIでrefresh・logout・loginを直列化
+- JWT本体をlocalStorageへ保存しない
+
+`quizverse_session_hint`はJWTを含まないセッション候補のヒントです。認証状態の最終確認は`GET /api/auth/me`で行います。
+
+## 認証API
+
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/google`
+- `POST /api/auth/otp/request`
+- `POST /api/auth/otp/verify`
+- `POST /api/auth/refresh`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+
+`suspended / withdrawn`ユーザーはlogin、OTP、access JWT、refresh Cookieを403 `auth/account_inactive`で拒否します。
+
+## クイズAPI
+
+- `POST /api/quizzes`: クイズ一括作成
+- `GET /api/quizzes`: 公開クイズ一覧
+- `GET /api/quizzes/{quiz_id}`: 詳細
+- `POST /api/quizzes/{quiz_id}/play`: 回答・採点
+- `GET /api/rankings`: 総合ランキング
+- `GET /api/quizzes/{quiz_id}/rankings`: クイズ別ランキング
+- `GET /api/me/quizzes`: 自分のクイズ一覧
+- `GET /api/me/quizzes/{quiz_id}`: 編集用データ
+- `PUT /api/me/quizzes/{quiz_id}`: 下書き更新
+- `PATCH /api/me/quizzes/{quiz_id}/status`: 公開状態変更
+
+クイズ作成条件:
+
+- 1〜50問
+- 各問題2〜6択
+- 正答は各問題1件
+- 作成直後は`draft`
+
+## 管理者機能（ISSUE-0038, ISSUE-0040）
+
+管理画面と管理APIはDB上の`users.role=admin`で保護します。
+
+- `/admin`: 管理ダッシュボード
+- `/admin/users`: ユーザー管理
+- `/admin/settings/email`: SMTP設定
+
+管理API:
+
+- `GET /api/admin/session`
+- `GET /api/admin/overview`
+- `GET /api/admin/users`
+- `GET /api/admin/users/{user_id}`
+- `PATCH /api/admin/users/{user_id}/role`
+- `PATCH /api/admin/users/{user_id}/status`
+- `GET /api/admin/quizzes`
+- `GET /api/admin/email-settings`
+- `PUT /api/admin/email-settings`
+- `GET /api/admin/status`
+
+安全条件:
+
+- 未認証は401
+- 一般ユーザーは403
+- 自分自身の降格・停止は禁止
+- 最後のactive adminを失う変更は禁止
+- PostgreSQL advisory lockで管理者変更を直列化
+- role/status変更を`audit_logs`へ記録
+- ユーザー一覧・詳細はメールをマスク
 
 ## DBマイグレーション
+
 ```bash
 cd backend
 flask --app app db upgrade
 ```
 
 モデル変更時:
+
 ```bash
 cd backend
 flask --app app db migrate -m "describe change"
 flask --app app db upgrade
 ```
 
-## テスト
-バックエンド:
+Vercel Function起動時には自動マイグレーションを実行しません。デプロイ前に外部PostgreSQLのバックアップと対象revisionを確認し、明示的に適用してください。
 
-```bash
-cd backend && PYTHONPATH=. pytest
+ISSUE-0040とISSUE-0042は既存テーブルを利用するため追加migrationはありません。
+
+## Vercelデプロイ
+
+QuizVerseは単一Vercelプロジェクトでfrontendとbackendを配信します。
+
+- Vite output: `frontend/dist`
+- Flask Function: `api/index.py`
+- `/api/*`: Flask Functionへrewrite
+- その他: SPA `index.html`へrewrite
+- Database: 外部PostgreSQL
+
+必須環境変数:
+
+```env
+DATABASE_URL=
+SECRET_KEY=
+JWT_SECRET_KEY=
+JWT_COOKIE_SECURE=true
+AUTH_EXPOSE_TOKEN_IN_RESPONSE=false
+AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false
+OTP_INCLUDE_CODE_IN_RESPONSE=false
+QUIZ_PUBLICATION_ENFORCED=true
 ```
 
-`backend/pytest.ini`では`sqlalchemy.exc.LegacyAPIWarning`をエラーとして扱います。`Query.get()`などのSQLAlchemy Legacy APIが再導入された場合は、バックエンドCIが失敗します。
+主な追加設定:
 
-フロントエンド回帰テスト:
+- `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`
+- `JWT_REFRESH_TOKEN_EXPIRES_SECONDS`
+- `JWT_COOKIE_SAMESITE`
+- `JWT_COOKIE_DOMAIN`
+- `ADMIN_BOOTSTRAP_EMAILS`
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `EMAIL_SETTINGS_ENCRYPTION_KEY`
+- OTP関連設定
+- サービスメンテナンス設定
 
-```bash
-npm --prefix frontend test
-```
+初期管理者は`ADMIN_BOOTSTRAP_EMAILS`へメールアドレスを設定します。自動昇格には、同一メールアドレスでGoogle OAuthの`email_verified`確認を通過している必要があります。
 
-Vercel 設定のみ確認する場合:
+デプロイ後の主な確認先:
 
-```bash
-cd backend && PYTHONPATH=. pytest tests/test_vercel_deployment.py
-```
-
-フロントエンドのProduction Build:
-
-```bash
-npm --prefix frontend install
-npm --prefix frontend run build
-```
-
-## 一般ユーザー向けフロントエンド（ISSUE-0018, ISSUE-0024, ISSUE-0026, ISSUE-0028, ISSUE-0030, ISSUE-0032）
-既存APIへ接続した一般向けMVP画面を実装しています。
-
-- `/`: ホーム・注目クイズ・ランキングプレビュー
-- `/signup`: メールアドレスとパスワードによる新規登録
-- `/login`: ログイン
-- `/quizzes`: 公開中クイズの一覧・キーワード検索・カテゴリ絞り込み・ページング
-- `/quizzes/new`: ログイン済みユーザー向けクイズ作成
-- `/my/quizzes`: 自分の下書き・公開中・アーカイブ済みクイズ管理
-- `/my/quizzes/{quiz_id}/edit`: プレイ履歴のない本人所有下書きの編集
-- `/quizzes/{quiz_id}`: 公開クイズの詳細・回答・採点結果、または作成者向け非公開プレビュー
-- `/rankings`: 現在公開中クイズを対象とした総合ランキング
-- `/quizzes/{quiz_id}/rankings`: 公開中クイズのクイズ別ランキング
-
-クイズ作成画面では、タイトル・説明・カテゴリ、1〜50問、各問題2〜6択、正答1件を入力し、HttpOnly Cookie認証とCSRFヘッダー付きで `POST /api/quizzes` へ送信します。作成結果は `draft` となり、作成者は詳細画面でプレビューした後、マイクイズ画面から編集・公開できます。
-
-### クイズ公開ライフサイクル
-
-- `draft`: 作成者だけがプレビュー可能。一般一覧・回答・ランキング対象外
-- `published`: 一般一覧・詳細・回答・ランキング対象
-- `archived`: 公開終了。作成者だけがプレビュー・再公開可能
-
-非公開クイズへ非作成者がアクセスした場合は、存在を推測させないため404を返します。公開状態の境界は `QUIZ_PUBLICATION_ENFORCED=true` で有効化し、本番では必ず `true` を設定してください。
-
-下書き編集は作成者本人かつプレイ履歴が存在しないクイズだけに限定しています。公開中・アーカイブ済みクイズは直接編集できません。また、一度でもプレイ履歴が保存されたクイズは、過去の採点結果と問題構造の整合性を守るため、下書きへ戻しても編集できません。
-
-### ブラウザ認証セッション
-
-一般ユーザー向けWeb画面は、access tokenとrefresh tokenをHttpOnly Cookieで受け取ります。JWT本体はJavaScriptから参照せず、`localStorage`には画面表示用の`quizverse_user`だけを保存します。旧`quizverse_access_token`キーは起動・ログイン・ログアウト時に削除します。
-
-- access token: 短命Cookie、通常の保護APIで利用
-- refresh token: `/api/auth/refresh`専用Cookie
-- CSRF: JavaScriptから読めるCSRF Cookieを状態変更リクエストの`X-CSRF-TOKEN`へ設定
-- API通信: `credentials: same-origin`
-- access token期限切れ: 同時401を1つのrefresh Promiseへ集約し、成功後に元のAPIを1回だけ再試行
-- 複数タブ排他: refresh・logout・login・register・Google loginをWeb Locks APIの共通`exclusive`ロックで直列化
-- Web Locks API非対応環境: 既存の同一タブPromise制御へフォールバック
-- refresh失敗: 表示キャッシュを削除し、復帰先付きログイン画面へ遷移
-
-`quizverse_session_hint`はJWTを含まないセッション候補のヒントです。認証済みかどうかの最終確認は`GET /api/auth/me`で行います。CLI・既存APIクライアント向けのAuthorizationヘッダーJWT互換は残しますが、一般ユーザー向けWeb画面からは送信しません。
-
-## 管理者RBAC・ユーザー管理（ISSUE-0038, ISSUE-0040）
-
-管理画面と管理APIは、DB上の`users.role=admin`で保護します。ブラウザの`localStorage`や`X-Admin-Mode`は管理者判定に使用しません。
-
-- 未認証: 401
-- 一般ユーザー: 403
-- `suspended` / `withdrawn`: 403 `auth/account_inactive`
-- `active`かつ`admin`: 利用可能
-- 認可時はJWT claimだけでなくDB上の現在ロールと状態を確認
-- 初期管理者の自動昇格は、設定メールと一致する確認済みGoogle OAuth連携を必須とする
-- 管理画面はHttpOnly Cookie認証を利用
-- PATCH/PUTはCSRF二重送信で保護
-- ユーザー一覧・詳細はメールアドレスをマスクし、パスワードハッシュ等を返さない
-- 自分自身の降格・停止を禁止
-- role/status変更を`audit_logs`へbefore/after付きで記録
-- 停止後は期限内のaccess JWT・refresh CookieもDBの現在statusで拒否
-
-管理API:
-
-- `GET /api/admin/session`: 現在の管理者セッションを確認
-- `GET /api/admin/overview`: 管理ダッシュボード集計
-- `GET /api/admin/users`: 検索・role/statusフィルター・ページング対応のユーザー一覧
-- `GET /api/admin/users/{user_id}`: マスク済みユーザー詳細
-- `PATCH /api/admin/users/{user_id}/role`: role変更
-- `PATCH /api/admin/users/{user_id}/status`: active/suspended/withdrawn変更
-- `GET /api/admin/quizzes`: クイズ一覧
-- `GET /api/admin/email-settings`: SMTP設定取得
-- `PUT /api/admin/email-settings`: SMTP設定更新
-- `GET /api/admin/status`: 内部サービスステータス
-
-## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007, ISSUE-0030, ISSUE-0032, ISSUE-0034, ISSUE-0038, ISSUE-0040）
-- JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `JWT_REFRESH_TOKEN_EXPIRES_SECONDS`, `JWT_COOKIE_SECURE`）。
-- ブラウザはHttpOnly Cookie認証、状態変更APIはCSRF二重送信を利用します。
-- OTP設定は環境変数で管理します（例: `OTP_EXPIRES_SECONDS`, `OTP_MIN_RESEND_SECONDS`, `OTP_MAX_REQUESTS_PER_HOUR`, `OTP_MAX_VERIFY_ATTEMPTS`）。
-- Google OAuth ログインを利用する場合は `GOOGLE_OAUTH_CLIENT_ID` を設定してください。
-- メール設定暗号化キーは `EMAIL_SETTINGS_ENCRYPTION_KEY` で指定できます。未指定時は `SECRET_KEY` から導出した鍵を仮利用します。
-- 数値ユーザーIDを持つJWTは、全`jwt_required`経路でDBの現在statusを検証します。
-- `suspended/withdrawn`はlogin、OTP、access JWT、refresh Cookieを403で拒否します。
-- 本実装済みエンドポイント
-  - `POST /api/quizzes`: JWT必須。クイズ本体 + 問題 + 選択肢を下書きとして一括作成（各問題2〜6択、正答は1つ）
-  - `GET /api/quizzes`: `published` のクイズ一覧を取得（`q` キーワード検索, `category` 完全一致, `page`/`per_page` ページング）
-  - `GET /api/quizzes/{quiz_id}`: 公開クイズ詳細を取得。非公開時はJWTで作成者本人のみプレビュー可能（正答は返さない）
-  - `POST /api/quizzes/{quiz_id}/play`: JWT必須。公開中クイズへの回答送信・採点・プレイ履歴保存
-  - `GET /api/quizzes/{quiz_id}/rankings`: 公開中クイズのランキング（ユーザーごとのベストプレイ採用）
-  - `GET /api/rankings`: 現在公開中のクイズだけを対象に、ユーザー×クイズのベストスコアを合算
-  - `GET /api/me/quizzes`: JWT必須。自分が作成したクイズを状態別に取得
-  - `GET /api/me/quizzes/{quiz_id}`: JWT必須。本人所有かつ編集可能な下書きを正答情報付きで取得
-  - `PUT /api/me/quizzes/{quiz_id}`: JWT必須。本人所有・プレイ履歴なしの下書き内容を一括更新
-  - `PATCH /api/me/quizzes/{quiz_id}/status`: JWT必須。本人所有クイズの `draft / published / archived` を変更
-  - `GET /api/admin/session`: adminロール必須。管理者セッションを返却
-  - `GET /api/admin/overview`: adminロール必須。管理ダッシュボード向けサマリー
-  - `GET /api/admin/users`: adminロール必須。検索・フィルター付きユーザー一覧
-  - `GET /api/admin/users/{user_id}`: adminロール必須。ユーザー詳細
-  - `PATCH /api/admin/users/{user_id}/role`: adminロール必須。ロール変更と監査記録
-  - `PATCH /api/admin/users/{user_id}/status`: adminロール必須。状態変更と監査記録
-  - `GET /api/admin/quizzes`: adminロール必須。作成者・ステータス・プレイ数を含むクイズ一覧
-  - `GET /api/admin/email-settings`: adminロール必須。機密値をマスクしたメール設定取得
-  - `PUT /api/admin/email-settings`: adminロール必須。SMTPパスワードを更新時のみ受け取り
-  - `GET /api/status`: 一般公開向けサービスステータス
-  - `GET /api/admin/status`: adminロール必須。管理向け詳細ステータス
-  - `POST /api/auth/register`: メールアドレス・パスワードで新規登録し、access / refresh Cookieを発行
-  - `POST /api/auth/login`: メールアドレス・パスワードを検証し、access / refresh Cookieを発行
-  - `POST /api/auth/google`: Google ID token を検証し、access / refresh Cookieを発行
-  - `POST /api/auth/refresh`: refresh CookieとCSRF値を検証し、新しいaccess Cookieを発行
-  - `POST /api/auth/logout`: access / refresh / CSRF Cookieを削除
-  - `POST /api/auth/otp/request`: OTPコードを発行・保存し、メール送信基盤で送信（MVPではemailのみ対応）
-  - `POST /api/auth/otp/verify`: destination / purpose に紐づくOTPコードを検証し、成功時に使用済み化
-  - `GET /api/auth/me`: CookieまたはAuthorizationヘッダーJWTからログイン中ユーザーの基本情報を返却
-- 開発補助エンドポイント
-  - `POST /api/auth/dev-token`: 開発/検証専用の仮トークン発行（`AUTH_ENABLE_DEV_TOKEN_ENDPOINT=true` の場合のみ）
-- 検証用保護ルート
-  - `GET /api/auth/protected`: JWT必須の保護エンドポイント
-- `AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false` と `AUTH_EXPOSE_TOKEN_IN_RESPONSE=false` を本番で明示設定してください。
-- `channel=phone` は将来拡張用のインターフェースのみで、MVPでは `auth/otp_channel_not_implemented` を返します。
+- `/`
+- `/login`
+- `/quizzes`
+- `/quizzes/new`
+- `/my/quizzes`
+- `/profile`
+- `/rankings`
+- `/status`
+- `/admin`
+- `/admin/users`
+- `/api/health`
+- `/api/status`
 
 ## ドキュメント
+
 - ロードマップ: `docs/roadmap.md`
 - Issue仕様: `docs/issues/`
-- Issue: `docs/issues/ISSUE-0038.md`
-- Issue: `docs/issues/ISSUE-0040.md`
-- スキーマ定義: `docs/schema/mvp_core_tables.md`
-- Qiita下書き: `docs/qiita/ISSUE-0038_admin_rbac_foundation.md`
-- Qiita下書き: `docs/qiita/ISSUE-0040_admin_user_management.md`
-
-## フロントエンド（管理ダッシュボード / ISSUE-0014, ISSUE-0038, ISSUE-0040）
-- `/admin`配下はサーバー側の実ロールを確認して表示します。
-- `/admin/users`は検索・フィルター・ページング・詳細・role/status変更に対応します。
-- PCではテーブル、モバイルではカードで表示します。
-- 自己降格・自己停止はUIとAPIの両方で禁止します。
-- 状態変更後は一覧と詳細を再取得します。
-- 管理APIはHttpOnly Cookieを利用し、PATCH/PUTではCSRFヘッダーを送信します。
-
-## フロントエンド（サービス状況表示 / ISSUE-0016）
-- 公開向けステータスページを `/status` として実装。
-- ステータスカードで `正常 / 注意 / 障害 / メンテナンス中` を色分け表示。
-- skeleton loading / 空状態 / エラー状態 / 更新時刻表示を実装。
-
-## フロントエンド（メール設定 / ISSUE-0015, ISSUE-0038）
-- 管理画面のメール設定ルートを `/admin/settings/email` として実装。
-- SMTP設定はadminロール必須の管理APIと連携します。
-- SMTPパスワードは取得時に平文を返さず、変更時のみ送信します。
-- 保存操作はHttpOnly Cookie認証とCSRF二重送信で保護します。
+- DBスキーマ: `docs/schema/mvp_core_tables.md`
+- Qiita下書き: `docs/qiita/`
+- ISSUE-0042仕様: `docs/issues/ISSUE-0042.md`
+- ISSUE-0042記事: `docs/qiita/ISSUE-0042_profile_play_history.md`

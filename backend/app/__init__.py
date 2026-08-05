@@ -9,6 +9,8 @@ from .api.auth import auth_bp
 from .api.auth_session import auth_session_bp
 from .api import auth_origin_guard  # noqa: F401
 from .api.health import health_bp
+from .api.profile import profile_bp
+from .api import profile_answer_guard  # noqa: F401
 from .api.quiz_editing import quiz_editing_bp
 from .api.quiz_management import quiz_management_bp
 from .api.quizzes import quizzes_bp
@@ -33,6 +35,7 @@ def create_app(config_class=Config):
     install_admin_user_list_view(app)
     app.register_blueprint(auth_bp)
     app.register_blueprint(auth_session_bp)
+    app.register_blueprint(profile_bp)
     app.register_blueprint(quiz_editing_bp)
     app.register_blueprint(quiz_management_bp)
     app.register_blueprint(quizzes_bp)
