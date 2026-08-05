@@ -33,6 +33,7 @@ class TestConfig(Config):
 def make_client():
     app = create_app(TestConfig)
     with app.app_context():
+        db.create_all()
         user = User(
             id=1,
             email="player@example.com",
