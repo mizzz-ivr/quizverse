@@ -5,11 +5,11 @@ from .profile import profile_bp
 
 @profile_bp.after_request
 def hide_replayable_quiz_answer_keys(response):
-    """Prevent submitted empty attempts from becoming an answer-key endpoint.
+    """Prevent weak/skipped attempts from becoming an answer-key endpoint.
 
-    A player may review the choice they selected and whether that selection was
-    correct. The actual answer key and explanation are disclosed only after the
-    quiz is no longer replayable (draft/archived).
+    While a quiz remains replayable, the complete answer key is disclosed only
+    after a perfect attempt. Otherwise the player may review their own choice
+    and result, but unselected correct choices and explanations stay hidden.
     """
     if (
         request.method != "GET"
@@ -24,10 +24,13 @@ def hide_replayable_quiz_answer_keys(response):
 
     play = payload.get("play")
     quiz = play.get("quiz") if isinstance(play, dict) else None
-    if not isinstance(quiz, dict):
+    if not isinstance(play, dict) or not isinstance(quiz, dict):
         return response
 
-    review_unlocked = not bool(quiz.get("is_replayable"))
+    total_questions = int(play.get("total_questions") or 0)
+    correct_answers = int(play.get("correct_answers") or 0)
+    perfect_attempt = total_questions > 0 and correct_answers == total_questions
+    review_unlocked = not bool(quiz.get("is_replayable")) or perfect_attempt
     payload["review"] = {
         "answer_key_unlocked": review_unlocked,
         "locked_reason": None if review_unlocked else "quiz_is_published",
