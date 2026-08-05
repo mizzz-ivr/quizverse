@@ -58,7 +58,7 @@ npm --prefix frontend run build
 - 全問正解回数
 - 作成クイズ数
 - 提出済みプレイ履歴
-- 問題ごとの選択肢・正誤・獲得点・解説
+- 問題ごとの選択内容・正誤・獲得点
 
 履歴は次の区分で絞り込めます。
 
@@ -68,6 +68,8 @@ npm --prefix frontend run build
 
 非公開・アーカイブ済みクイズの過去結果も本人には表示します。再挑戦導線は現在`published`のクイズだけ有効です。
 
+公開中クイズでは、空回答や弱い提出から正答キーを収集できないよう、全問正解ではないプレイの正解選択肢と解説をロックします。完全な正答キーと解説は、全問正解した場合、またはクイズが`draft / archived`となり再挑戦できない場合だけ返します。
+
 プロフィールAPI:
 
 - `GET /api/me/profile`
@@ -75,7 +77,7 @@ npm --prefix frontend run build
 - `GET /api/me/plays`
 - `GET /api/me/plays/{play_id}`
 
-すべてJWT/Cookie認証必須です。他ユーザーの履歴は404として扱い、正答と解説は本人の`submitted`済みプレイ詳細でのみ返します。
+すべてJWT/Cookie認証必須です。他ユーザーの履歴は404として扱います。
 
 詳細仕様: `docs/issues/ISSUE-0042.md`
 
