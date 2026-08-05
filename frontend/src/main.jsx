@@ -7,8 +7,10 @@ import { AdminUserManagementApp } from './AdminUserManagementApp'
 import { CreateQuizApp } from './public/CreateQuizApp'
 import { EditQuizApp } from './public/EditQuizApp'
 import { MyQuizzesApp } from './public/MyQuizzesApp'
+import { ProfileApp } from './public/ProfileApp'
 import { PublicQuizApp } from './public/PublicQuizApp'
 import { QuizDetailSessionGate } from './public/QuizDetailSessionGate'
+import './public/profileApi.js'
 import { removeLegacyAuthToken } from './public/api'
 
 // Run the localStorage JWT cleanup for every entry path, including /status and
@@ -20,6 +22,13 @@ function PublicQuizRoot() {
     <>
       <PublicQuizApp />
       <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-2">
+        <a
+          href="/profile"
+          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:bg-slate-800"
+        >
+          <span aria-hidden="true">◎</span>
+          プロフィール
+        </a>
         <a
           href="/my/quizzes"
           className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:bg-slate-800"
@@ -46,6 +55,7 @@ if (pathname === '/admin/users') RootApp = AdminUserManagementApp
 else if (pathname.startsWith('/admin')) RootApp = AdminApp
 if (pathname === '/quizzes/new') RootApp = CreateQuizApp
 if (pathname === '/my/quizzes') RootApp = MyQuizzesApp
+if (pathname === '/profile') RootApp = ProfileApp
 if (/^\/my\/quizzes\/\d+\/edit$/.test(pathname)) RootApp = EditQuizApp
 if (/^\/quizzes\/\d+$/.test(pathname)) RootApp = QuizDetailSessionGate
 
