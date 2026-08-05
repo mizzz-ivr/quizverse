@@ -2,7 +2,7 @@ from functools import wraps
 
 from flask import Blueprint, g, jsonify, request
 from flask_jwt_extended import jwt_required
-from sqlalchemy import and_, func
+from sqlalchemy import and_, case, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..authz import resolve_current_user
@@ -183,7 +183,7 @@ def get_profile():
             func.coalesce(func.sum(QuizPlay.total_questions), 0),
             func.coalesce(
                 func.sum(
-                    db.case(
+                    case(
                         (
                             and_(
                                 QuizPlay.total_questions > 0,
