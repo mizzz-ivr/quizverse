@@ -7,6 +7,7 @@ export function ratingStars(rating) {
 }
 
 export function formatRatingAverage(value) {
+  if (value === null || value === undefined || value === '') return '未評価'
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return '未評価'
   return numeric.toFixed(1)
