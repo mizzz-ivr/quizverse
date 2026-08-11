@@ -11,6 +11,7 @@ import { MyQuizzesApp } from './public/MyQuizzesApp'
 import { ProfileApp } from './public/ProfileApp'
 import { PublicQuizApp } from './public/PublicQuizApp'
 import { QuizDetailSessionGate } from './public/QuizDetailSessionGate'
+import { TopRatedApp } from './public/TopRatedApp'
 import './public/profileApi.js'
 import { removeLegacyAuthToken } from './public/api'
 
@@ -23,6 +24,13 @@ function PublicQuizRoot() {
     <>
       <PublicQuizApp />
       <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-2">
+        <a
+          href="/top-rated"
+          className="inline-flex items-center gap-2 rounded-2xl border border-amber-300 bg-white/95 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-amber-50 focus:outline-none focus:ring-4 focus:ring-amber-500/20 dark:border-amber-500/40 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:bg-slate-800"
+        >
+          <span aria-hidden="true">★</span>
+          高評価クイズ
+        </a>
         <a
           href="/favorites"
           className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:bg-slate-800"
@@ -64,6 +72,7 @@ else if (pathname.startsWith('/admin')) RootApp = AdminApp
 if (pathname === '/quizzes/new') RootApp = CreateQuizApp
 if (pathname === '/my/quizzes') RootApp = MyQuizzesApp
 if (pathname === '/favorites') RootApp = FavoritesApp
+if (pathname === '/top-rated') RootApp = TopRatedApp
 if (pathname === '/profile') RootApp = ProfileApp
 if (/^\/my\/quizzes\/\d+\/edit$/.test(pathname)) RootApp = EditQuizApp
 if (/^\/quizzes\/\d+$/.test(pathname)) RootApp = QuizDetailSessionGate
