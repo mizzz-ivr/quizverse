@@ -27,11 +27,20 @@ test('明示ログアウトはサーバー成功後だけ画面セッション�
 })
 
 
-test('クイズ詳細ルートは描画前にCookieセッションを確認する', async () => {
+test('クイズ詳細ルートはお気に入り操作を追加してもCookieセッション確認を維持する', async () => {
   const gateSource = await source('../src/public/QuizDetailSessionGate.jsx')
   const mainSource = await source('../src/main.jsx')
 
   assert.match(gateSource, /publicApi\.me\(initialSession\.accessToken\)/)
   assert.match(gateSource, /if \(!ready\) return <LoadingSession \/>/)
-  assert.match(mainSource, /RootApp = QuizDetailSessionGate/)
+  assert.match(mainSource, /function QuizDetailRoot\(\)/)
+  assert.match(mainSource, /<QuizDetailSessionGate \/>/)
+  assert.match(mainSource, /<BookmarkQuickAction \/>/)
+  assert.match(mainSource, /RootApp = QuizDetailRoot/)
+
+  const detailRootStart = mainSource.indexOf('function QuizDetailRoot()')
+  const detailRootEnd = mainSource.indexOf('\n}\n\nconst pathname', detailRootStart)
+  const detailRoot = mainSource.slice(detailRootStart, detailRootEnd)
+  assert.ok(detailRoot.indexOf('<QuizDetailSessionGate />') >= 0)
+  assert.ok(detailRoot.indexOf('<BookmarkQuickAction />') > detailRoot.indexOf('<QuizDetailSessionGate />'))
 })
