@@ -13,13 +13,15 @@ from .api.health import health_bp
 from .api.profile import profile_bp
 from .api import profile_answer_guard  # noqa: F401
 from .api.quiz_editing import quiz_editing_bp
+from .api.review_catalog import review_catalog_bp
+from .api.reviews import reviews_bp
 from .api.quiz_management import quiz_management_bp
 from .api.quizzes import quizzes_bp
 from .api.rankings import rankings_bp
 from .api.status import status_bp
 from .config import Config
 from .extensions import db, jwt, migrate
-from . import models, models_bookmarks  # noqa: F401
+from . import models, models_bookmarks, models_reviews  # noqa: F401
 
 
 def create_app(config_class=Config):
@@ -39,6 +41,10 @@ def create_app(config_class=Config):
     app.register_blueprint(bookmarks_bp)
     app.register_blueprint(profile_bp)
     app.register_blueprint(quiz_editing_bp)
+    # review_catalog must be registered before quiz_management so sort=rating
+    # can resolve the public catalog before the publication visibility guard.
+    app.register_blueprint(review_catalog_bp)
+    app.register_blueprint(reviews_bp)
     app.register_blueprint(quiz_management_bp)
     app.register_blueprint(quizzes_bp)
     app.register_blueprint(rankings_bp)
