@@ -62,6 +62,18 @@
 - クイズが`draft/archived`へ変わっても行は保持し、公開お気に入り一覧からのみ除外する。再公開時は再表示される。
 - migration revisionは`20260812_0010`。
 
+### quiz_reviews
+- ISSUE-0046で追加するクイズレビュー・5段階評価テーブル。
+- `user_id + quiz_id`を複合主キーとして、同一ユーザー・同一クイズは1レビューだけ保持する。
+- `rating`は1〜5の整数で、`ck_quiz_reviews_rating_range`によりDBレベルでも範囲を制約する。
+- `body`はnullable。APIでは1000文字以内に制限し、空白のみはNULLへ正規化する。
+- `user_id`は`users.id`、`quiz_id`は`quizzes.id`を参照し、どちらも削除時はCASCADE。
+- `quiz_id`にIndex `ix_quiz_reviews_quiz_id`を持ち、クイズ単位の平均評価・件数集計に利用する。
+- `created_at` / `updated_at`を保持し、公開レビュー一覧は更新日時の新しい順で返す。
+- 投稿はAPIレイヤで「対象クイズがpublished」「作成者本人ではない」「submitted playが1件以上」の条件を確認する。
+- クイズが`draft/archived`へ変わっても行は保持し、一般レビュー表示・新規更新を停止する。再公開時は再表示される。
+- migration revisionは`20260812_0011`。
+
 ### leaderboard_snapshots
 - 日次・クイズ単位のランキングスナップショット。
 - `snapshot_date + quiz_id + user_id` ユニーク。
@@ -95,3 +107,4 @@
 - メール設定は `email_settings` 単一レコード管理（MVP仮置き）。
 - `smtp_password_encrypted` の暗号鍵運用（ローテーション/復旧）は後続Issueで設計。
 - 監査ログの閲覧UI・保存期間・外部転送は後続Issueで設計。
+- レビュー通報・モデレーション・スパム判定・ベイズ補正ランキングは後続Issueで設計する。

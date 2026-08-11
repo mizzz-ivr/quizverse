@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { ApiError, getStoredSession, publicApi } from './api.js'
 import { BookmarkQuickAction } from './BookmarkQuickAction.jsx'
 import { QuizDetailApp } from './QuizDetailApp.jsx'
+import { ReviewQuickAction } from './ReviewQuickAction.jsx'
 
 
 function LoadingSession() {
@@ -46,6 +47,7 @@ export function QuizDetailSessionGate() {
   return (
     <>
       <QuizDetailApp />
+      <ReviewQuickAction />
       <BookmarkQuickAction />
     </>
   )

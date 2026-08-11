@@ -36,7 +36,8 @@ npm --prefix frontend run build
 - `/signup`: 新規登録
 - `/login`: ログイン
 - `/quizzes`: 公開クイズ一覧・検索・カテゴリ絞り込み
-- `/quizzes/{quiz_id}`: クイズ詳細・回答・採点結果・お気に入り操作
+- `/top-rated`: 高評価クイズ一覧
+- `/quizzes/{quiz_id}`: クイズ詳細・回答・採点結果・レビュー・お気に入り操作
 - `/quizzes/{quiz_id}/rankings`: クイズ別ランキング
 - `/rankings`: 総合ランキング
 - `/quizzes/new`: クイズ作成
@@ -45,6 +46,43 @@ npm --prefix frontend run build
 - `/favorites`: お気に入り・あとで遊ぶ一覧
 - `/profile`: プロフィール・成績・プレイ履歴
 - `/status`: 公開サービス状況
+
+## レビュー・5段階評価（ISSUE-0046）
+
+公開クイズを1回以上プレイしたユーザーは、クイズ詳細画面から1〜5点の評価と任意コメントを投稿できます。レビューは`quiz_reviews`テーブルへ保存し、同一ユーザー・同一クイズは1件だけ保持します。
+
+レビュー投稿条件:
+
+- クイズが`published`
+- 認証済みactiveユーザー
+- 対象クイズの`submitted`プレイが1件以上存在する
+- クイズ作成者本人ではない
+
+レビューは投稿後も編集・削除できます。クイズが`draft / archived`になった場合はレビュー行を削除せず公開表示だけ停止し、再公開時に復帰します。
+
+`/top-rated`では平均評価の高い順で公開クイズを探索できます。並び順は次の優先順位です。
+
+1. 平均評価降順
+2. レビュー件数降順
+3. 公開日時降順
+4. クイズID降順
+
+公開クイズ一覧・詳細レスポンスには次の評価集計を付与します。
+
+- `rating_average`: 平均評価。未評価は`null`
+- `review_count`: レビュー件数
+
+レビューAPI:
+
+- `GET /api/quizzes/{quiz_id}/reviews`
+- `GET /api/quizzes/{quiz_id}/reviews/me`
+- `PUT /api/quizzes/{quiz_id}/reviews/me`
+- `DELETE /api/quizzes/{quiz_id}/reviews/me`
+- `GET /api/quizzes?sort=rating`: 高評価順の公開クイズ一覧
+
+PUT/DELETEはCookie認証時に既存のCSRF二重送信を利用します。他ユーザーのレビューを更新・削除するAPIは提供しません。
+
+詳細仕様: `docs/issues/ISSUE-0046.md`
 
 ## お気に入り・あとで遊ぶ（ISSUE-0044）
 
@@ -118,7 +156,7 @@ npm --prefix frontend run build
 ## クイズ公開ライフサイクル
 
 - `draft`: 作成者だけがプレビュー可能
-- `published`: 一般一覧・詳細・回答・ランキング対象
+- `published`: 一般一覧・詳細・回答・ランキング・レビュー対象
 - `archived`: 公開終了。作成者だけがプレビュー・再公開可能
 
 非公開クイズへ非作成者がアクセスした場合は404を返します。本番では`QUIZ_PUBLICATION_ENFORCED=true`を設定してください。
@@ -155,9 +193,13 @@ npm --prefix frontend run build
 ## クイズAPI
 
 - `POST /api/quizzes`: クイズ一括作成
-- `GET /api/quizzes`: 公開クイズ一覧
+- `GET /api/quizzes`: 公開クイズ一覧（`sort=latest|rating`）
 - `GET /api/quizzes/{quiz_id}`: 詳細
 - `POST /api/quizzes/{quiz_id}/play`: 回答・採点
+- `GET /api/quizzes/{quiz_id}/reviews`: 公開レビュー一覧・評価集計
+- `GET /api/quizzes/{quiz_id}/reviews/me`: 本人レビュー・投稿可否
+- `PUT /api/quizzes/{quiz_id}/reviews/me`: 本人レビュー作成・更新
+- `DELETE /api/quizzes/{quiz_id}/reviews/me`: 本人レビュー削除
 - `GET /api/rankings`: 総合ランキング
 - `GET /api/quizzes/{quiz_id}/rankings`: クイズ別ランキング
 - `GET /api/me/quizzes`: 自分のクイズ一覧
@@ -220,7 +262,7 @@ flask --app app db upgrade
 
 Vercel Function起動時には自動マイグレーションを実行しません。デプロイ前に外部PostgreSQLのバックアップと対象revisionを確認し、明示的に適用してください。
 
-ISSUE-0040とISSUE-0042は既存テーブルを利用するため追加migrationはありません。ISSUE-0044では`quiz_bookmarks`を追加するrevision `20260812_0010`を適用してください。
+ISSUE-0040とISSUE-0042は既存テーブルを利用するため追加migrationはありません。ISSUE-0044では`quiz_bookmarks`を追加するrevision `20260812_0010`、ISSUE-0046では`quiz_reviews`を追加するrevision `20260812_0011`を適用してください。
 
 ## Vercelデプロイ
 
@@ -264,6 +306,7 @@ QUIZ_PUBLICATION_ENFORCED=true
 - `/`
 - `/login`
 - `/quizzes`
+- `/top-rated`
 - `/quizzes/new`
 - `/my/quizzes`
 - `/favorites`
@@ -285,3 +328,5 @@ QUIZ_PUBLICATION_ENFORCED=true
 - ISSUE-0042記事: `docs/qiita/ISSUE-0042_profile_play_history.md`
 - ISSUE-0044仕様: `docs/issues/ISSUE-0044.md`
 - ISSUE-0044記事: `docs/qiita/ISSUE-0044_quiz_bookmarks.md`
+- ISSUE-0046仕様: `docs/issues/ISSUE-0046.md`
+- ISSUE-0046記事: `docs/qiita/ISSUE-0046_quiz_reviews.md`
