@@ -4,7 +4,6 @@ import './styles.css'
 import { App } from './App'
 import { AdminApp } from './AdminApp'
 import { AdminUserManagementApp } from './AdminUserManagementApp'
-import { BookmarkQuickAction } from './public/BookmarkQuickAction'
 import { CreateQuizApp } from './public/CreateQuizApp'
 import { EditQuizApp } from './public/EditQuizApp'
 import { FavoritesApp } from './public/FavoritesApp'
@@ -57,15 +56,6 @@ function PublicQuizRoot() {
   )
 }
 
-function QuizDetailRoot() {
-  return (
-    <>
-      <QuizDetailSessionGate />
-      <BookmarkQuickAction />
-    </>
-  )
-}
-
 const pathname = window.location.pathname
 let RootApp = PublicQuizRoot
 if (pathname === '/status') RootApp = App
@@ -76,7 +66,7 @@ if (pathname === '/my/quizzes') RootApp = MyQuizzesApp
 if (pathname === '/favorites') RootApp = FavoritesApp
 if (pathname === '/profile') RootApp = ProfileApp
 if (/^\/my\/quizzes\/\d+\/edit$/.test(pathname)) RootApp = EditQuizApp
-if (/^\/quizzes\/\d+$/.test(pathname)) RootApp = QuizDetailRoot
+if (/^\/quizzes\/\d+$/.test(pathname)) RootApp = QuizDetailSessionGate
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
