@@ -8,6 +8,7 @@ from .api.admin_user_management import (
 from .api.auth import auth_bp
 from .api.auth_session import auth_session_bp
 from .api import auth_origin_guard  # noqa: F401
+from .api.bookmarks import bookmarks_bp
 from .api.health import health_bp
 from .api.profile import profile_bp
 from .api import profile_answer_guard  # noqa: F401
@@ -18,7 +19,7 @@ from .api.rankings import rankings_bp
 from .api.status import status_bp
 from .config import Config
 from .extensions import db, jwt, migrate
-from . import models  # noqa: F401
+from . import models, models_bookmarks  # noqa: F401
 
 
 def create_app(config_class=Config):
@@ -35,6 +36,7 @@ def create_app(config_class=Config):
     install_admin_user_list_view(app)
     app.register_blueprint(auth_bp)
     app.register_blueprint(auth_session_bp)
+    app.register_blueprint(bookmarks_bp)
     app.register_blueprint(profile_bp)
     app.register_blueprint(quiz_editing_bp)
     app.register_blueprint(quiz_management_bp)
