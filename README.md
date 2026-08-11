@@ -36,14 +36,48 @@ npm --prefix frontend run build
 - `/signup`: 新規登録
 - `/login`: ログイン
 - `/quizzes`: 公開クイズ一覧・検索・カテゴリ絞り込み
-- `/quizzes/{quiz_id}`: クイズ詳細・回答・採点結果
+- `/quizzes/{quiz_id}`: クイズ詳細・回答・採点結果・お気に入り操作
 - `/quizzes/{quiz_id}/rankings`: クイズ別ランキング
 - `/rankings`: 総合ランキング
 - `/quizzes/new`: クイズ作成
 - `/my/quizzes`: 自分のクイズ管理
 - `/my/quizzes/{quiz_id}/edit`: 下書き編集
+- `/favorites`: お気に入り・あとで遊ぶ一覧
 - `/profile`: プロフィール・成績・プレイ履歴
 - `/status`: 公開サービス状況
+
+## お気に入り・あとで遊ぶ（ISSUE-0044）
+
+公開中のクイズは詳細画面から「あとで遊ぶ」へ保存できます。保存先はブラウザlocalStorageではなく`quiz_bookmarks`テーブルなので、同じアカウントなら端末をまたいで保持できます。
+
+`/favorites`では次を確認できます。
+
+- 保存中の公開クイズ件数
+- カテゴリ・問題数
+- タイトル・概要・作成者
+- 保存日
+- 保存解除
+- クイズ詳細／プレイ導線
+- 12件単位のページング
+
+公開状態の境界:
+
+- 新規保存・状態確認・一覧表示は`published`のみ
+- 保存後に`draft / archived`へ変わったクイズはDB行を保持したまま一覧から除外
+- 再公開すると自動的にお気に入り一覧へ復帰
+- 解除APIはクイズが非公開になっていても実行可能
+- 非公開・不存在クイズの状態確認は404
+
+お気に入りAPI:
+
+- `GET /api/me/bookmarks`
+- `GET /api/me/bookmarks/{quiz_id}`
+- `PUT /api/me/bookmarks/{quiz_id}`
+- `DELETE /api/me/bookmarks/{quiz_id}`
+
+すべて認証必須です。Cookie認証時のPUT/DELETEは既存のCSRF二重送信を利用します。PUT/DELETEは冪等で、同一状態への再操作は`meta.changed=false`を返します。
+
+詳細仕様: `docs/issues/ISSUE-0044.md`
 
 ## プロフィール・プレイ履歴（ISSUE-0042）
 
@@ -186,7 +220,7 @@ flask --app app db upgrade
 
 Vercel Function起動時には自動マイグレーションを実行しません。デプロイ前に外部PostgreSQLのバックアップと対象revisionを確認し、明示的に適用してください。
 
-ISSUE-0040とISSUE-0042は既存テーブルを利用するため追加migrationはありません。
+ISSUE-0040とISSUE-0042は既存テーブルを利用するため追加migrationはありません。ISSUE-0044では`quiz_bookmarks`を追加するrevision `20260812_0010`を適用してください。
 
 ## Vercelデプロイ
 
@@ -232,6 +266,7 @@ QUIZ_PUBLICATION_ENFORCED=true
 - `/quizzes`
 - `/quizzes/new`
 - `/my/quizzes`
+- `/favorites`
 - `/profile`
 - `/rankings`
 - `/status`
@@ -248,3 +283,5 @@ QUIZ_PUBLICATION_ENFORCED=true
 - Qiita下書き: `docs/qiita/`
 - ISSUE-0042仕様: `docs/issues/ISSUE-0042.md`
 - ISSUE-0042記事: `docs/qiita/ISSUE-0042_profile_play_history.md`
+- ISSUE-0044仕様: `docs/issues/ISSUE-0044.md`
+- ISSUE-0044記事: `docs/qiita/ISSUE-0044_quiz_bookmarks.md`

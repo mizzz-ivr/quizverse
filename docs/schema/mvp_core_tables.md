@@ -53,6 +53,15 @@
 - `result` は `correct/incorrect/skipped`。
 - ISSUE-0010 では回答順ではなく `question_id` 基準で採点し、全設問ぶん保存する。
 
+### quiz_bookmarks
+- ISSUE-0044で追加する「あとで遊ぶ」保存テーブル。
+- `user_id + quiz_id` を複合主キーとして、同一ユーザー・同一クイズの重複保存をDBレベルで防止する。
+- `user_id` は `users.id`、`quiz_id` は `quizzes.id` を参照し、どちらも削除時はCASCADE。
+- `quiz_id` にIndex `ix_quiz_bookmarks_quiz_id`を持つ。
+- `created_at`をお気に入り一覧の保存順に利用する。
+- クイズが`draft/archived`へ変わっても行は保持し、公開お気に入り一覧からのみ除外する。再公開時は再表示される。
+- migration revisionは`20260812_0010`。
+
 ### leaderboard_snapshots
 - 日次・クイズ単位のランキングスナップショット。
 - `snapshot_date + quiz_id + user_id` ユニーク。

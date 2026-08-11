@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { ApiError, getStoredSession, publicApi } from './api.js'
+import { BookmarkQuickAction } from './BookmarkQuickAction.jsx'
 import { QuizDetailApp } from './QuizDetailApp.jsx'
 
 
@@ -42,5 +43,10 @@ export function QuizDetailSessionGate() {
   }, [initialSession?.accessToken])
 
   if (!ready) return <LoadingSession />
-  return <QuizDetailApp />
+  return (
+    <>
+      <QuizDetailApp />
+      <BookmarkQuickAction />
+    </>
+  )
 }
